@@ -9,9 +9,9 @@ import androidx.room.RoomDatabase
     entities = [
         TrackEntity::class, LikeEntity::class, PlaylistEntity::class, PlaylistTrackEntity::class,
         PlayEventEntity::class, SearchCacheEntity::class, RecentSearchEntity::class, AiCacheEntity::class,
-        KvSyncEntity::class, LyricsEntity::class, AudioFeaturesEntity::class, PendingMatchEntity::class,
+        KvSyncEntity::class, LyricsEntity::class, AudioFeaturesEntity::class, PendingMatchEntity::class, ImportHistoryEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class ArnavDatabase : RoomDatabase() {
@@ -25,6 +25,7 @@ abstract class ArnavDatabase : RoomDatabase() {
     abstract fun lyrics(): LyricsDao
     abstract fun audioFeatures(): AudioFeaturesDao
     abstract fun pendingMatches(): PendingMatchDao
+    abstract fun importHistory(): ImportHistoryDao
 
     companion object {
         const val NAME = "arnav-music.db"
@@ -46,9 +47,18 @@ abstract class ArnavDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_pending_matches_playlistId` ON `pending_matches` (`playlistId`)")
             }
         }
+        /** v4: musical key + intro/outro points for local songs; import history (undo/redo). */
+        val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `audio_features` ADD COLUMN `musicalKey` INTEGER NOT NULL DEFAULT -1")
+                db.execSQL("ALTER TABLE `audio_features` ADD COLUMN `introMs` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `audio_features` ADD COLUMN `outroMs` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `import_history` (`id` TEXT NOT NULL, `source` TEXT NOT NULL, `label` TEXT NOT NULL, `playlistIds` TEXT NOT NULL, `songCount` INTEGER NOT NULL, `matchedCount` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `undone` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+            }
+        }
         fun build(context: Context): ArnavDatabase =
             Room.databaseBuilder(context, ArnavDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .fallbackToDestructiveMigrationOnDowngrade(true)
                 .build()
     }

@@ -170,3 +170,11 @@ interface PendingMatchDao {
     @Query("DELETE FROM pending_matches WHERE id = :id") suspend fun delete(id: Long)
     @Query("DELETE FROM pending_matches WHERE playlistId = :playlistId") suspend fun deleteForPlaylist(playlistId: String)
 }
+
+@Dao
+interface ImportHistoryDao {
+    @Upsert suspend fun upsert(item: ImportHistoryEntity)
+    @Query("SELECT * FROM import_history ORDER BY createdAt DESC") fun observe(): Flow<List<ImportHistoryEntity>>
+    @Query("SELECT * FROM import_history WHERE id = :id") suspend fun get(id: String): ImportHistoryEntity?
+    @Query("DELETE FROM import_history WHERE id = :id") suspend fun delete(id: String)
+}

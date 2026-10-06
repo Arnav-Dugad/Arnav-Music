@@ -78,6 +78,10 @@ data class AppSettings(
     val ambientEdgeGlow: Boolean = true,
     /** Analyze on-device songs for tempo and loudness while charging. */
     val analyzeLocalAudio: Boolean = true,
+    /** Show the line being sung in the mini player when synced lyrics exist. */
+    val miniPlayerLyrics: Boolean = true,
+    /** Songs on this phone: begin the fade at the analysed outro and skip leading silence on the next song. */
+    val smartTransitions: Boolean = true,
 )
 
 class SettingsRepository(private val context: Context, scope: CoroutineScope) {
@@ -123,6 +127,8 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
         val beatVisuals = booleanPreferencesKey("beat_visuals")
         val ambientGlow = booleanPreferencesKey("ambient_edge_glow")
         val analyzeAudio = booleanPreferencesKey("analyze_local_audio")
+        val miniLyrics = booleanPreferencesKey("mini_player_lyrics")
+        val smartTransitions = booleanPreferencesKey("smart_transitions")
     }
 
     private inline fun <reified E : Enum<E>> Preferences.enum(key: Preferences.Key<String>, default: E): E =
@@ -176,6 +182,8 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
                 beatVisuals = p[K.beatVisuals] ?: d.beatVisuals,
                 ambientEdgeGlow = p[K.ambientGlow] ?: d.ambientEdgeGlow,
                 analyzeLocalAudio = p[K.analyzeAudio] ?: d.analyzeLocalAudio,
+                miniPlayerLyrics = p[K.miniLyrics] ?: d.miniPlayerLyrics,
+                smartTransitions = p[K.smartTransitions] ?: d.smartTransitions,
             )
         }
         .onEach { _loaded.value = true }
@@ -223,6 +231,8 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
             p[K.beatVisuals] = s.beatVisuals
             p[K.ambientGlow] = s.ambientEdgeGlow
             p[K.analyzeAudio] = s.analyzeLocalAudio
+            p[K.miniLyrics] = s.miniPlayerLyrics
+            p[K.smartTransitions] = s.smartTransitions
         }
     }
 

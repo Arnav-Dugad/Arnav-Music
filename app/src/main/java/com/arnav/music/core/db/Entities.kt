@@ -1,5 +1,6 @@
 package com.arnav.music.core.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -152,6 +153,12 @@ data class AudioFeaturesEntity(
     val version: Int,
     /** False when the file couldn't be decoded (not retried until the version changes). */
     val ok: Boolean,
+    /** Musical key 0..23 (0–11 = C..B major, 12–23 = C..B minor); −1 when unknown. */
+    @ColumnInfo(defaultValue = "-1") val musicalKey: Int = -1,
+    /** Where the music really starts (after leading silence/quiet intro), ms. */
+    @ColumnInfo(defaultValue = "0") val introMs: Long = 0,
+    /** Where the outro/fade-out tail begins, ms; 0 when unknown. */
+    @ColumnInfo(defaultValue = "0") val outroMs: Long = 0,
 )
 
 /** A song from a Spotify/CSV import still waiting to be matched to a YouTube upload. */
@@ -168,4 +175,20 @@ data class PendingMatchEntity(
     /** True once a search found nothing suitable; shown as "No match" and skipped. */
     val failed: Boolean = false,
     val createdAt: Long,
+)
+
+/** One file/account import, so it can be undone (playlists hidden) or redone (restored). */
+@Entity(tableName = "import_history")
+data class ImportHistoryEntity(
+    @PrimaryKey val id: String,
+    /** "spotify", "csv", "youtube". */
+    val source: String,
+    /** File name or account label shown in the list. */
+    val label: String,
+    /** Comma-separated playlist ids created or refreshed by this import. */
+    val playlistIds: String,
+    val songCount: Int,
+    val matchedCount: Int,
+    val createdAt: Long,
+    val undone: Boolean = false,
 )
