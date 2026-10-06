@@ -412,11 +412,15 @@ class PlaybackController(
         fadeJob = null
         val fade = settings.settings.value.fadeMs.toLong()
         if (fade <= 0) { c.volume = 1f; if (play) c.play() else c.pause(); return }
+        // If a fade-out was cut short the player never actually paused, so no "is playing" change
+        // will arrive: reflect it here or the UI would keep showing Play.
+        if (play && c.isPlaying) _state.update { it.copy(isPlaying = true) }
         fadeJob = scope.launch {
             val steps = 12
             if (play) {
-                c.volume = 0f; c.play()
-                for (i in 1..steps) { c.volume = i / steps.toFloat(); delay(fade / steps) }
+                c.volume = if (c.isPlaying) c.volume.coerceAtMost(1f) else 0f; c.play()
+                val start = c.volume
+                for (i in 1..steps) { c.volume = start + (1f - start) * i / steps.toFloat(); delay(fade / steps) }
             } else {
                 val from = c.volume
                 for (i in steps - 1 downTo 0) { c.volume = from * i / steps; delay(fade / steps) }

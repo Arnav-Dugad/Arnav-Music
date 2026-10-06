@@ -102,7 +102,14 @@ val appModule = module {
     single { com.arnav.music.core.update.UpdateManager(androidContext(), get(), get()) }
     single { com.arnav.music.core.youtube.UploadResolver(get()) }
     single { com.arnav.music.core.youtube.YouTubeImporter(get(), get(), get()) }
-    single { com.arnav.music.core.lyrics.LyricsRepository(androidContext(), get<ArnavDatabase>().lyrics()) }
+    single {
+        val settings: SettingsRepository = get()
+        com.arnav.music.core.lyrics.LyricsRepository(
+            androidContext(), get<ArnavDatabase>().lyrics(),
+            online = com.arnav.music.core.lyrics.LrclibClient(get(), "ArnavMusic/${com.arnav.music.BuildConfig.VERSION_NAME} (https://github.com/Arnav-Dugad/Arnav-Music)"),
+            onlineEnabled = { settings.settings.value.onlineLyrics },
+        )
+    }
     single { com.arnav.music.core.importer.FileImporter(androidContext()) }
     single { com.arnav.music.core.importer.ImportMatcher(androidContext(), get(), get(), get(), get()) }
     single { PlaybackController(androidContext(), get(), get(), get(), get(), get(), get()) }

@@ -74,7 +74,7 @@ Everything around playback — library, history, recommendations, Taste DNA, Mom
 - **Circular theme reveal**: switching theme or glass mode expands the new look from your finger.
 - **Home-screen widget**: artwork, title and play/skip, plus *Ask Arnav AI* and *Moments* shortcuts. It resizes with its cell size.
 - **Import from YouTube**: Library → ☁︎ copies your YouTube playlists and *Liked videos* into Arnav playlists, with live progress. It uses read-only access, and the token never leaves memory.
-- **Lyrics, Apple Music style**: big time-synced lines that glide into place with a gentle cascade, word-by-word fill for enhanced LRC, breathing dots through instrumental breaks, tap a line to jump there. The cover tucks into the corner while lyrics are open. Sources: lyrics embedded in your own files (ID3 USLT/SYLT, FLAC, MP4), `.lrc`/`.txt` files you import, or text you paste. Nothing is copied from websites.
+- **Lyrics, Apple Music style**: big time-synced lines that glide into place with a gentle cascade, word-by-word fill for enhanced LRC, breathing dots through instrumental breaks, tap a line to jump there. The cover tucks into the corner while lyrics are open. Sources: lyrics embedded in your own files (ID3 USLT/SYLT, FLAC, MP4), `.lrc`/`.txt` files you import, text you paste, and **LRCLIB**. LRCLIB is an open, community-maintained lyrics database; synced lyrics are fetched once and saved on the device (Settings → Playback → Online lyrics).
 - **Tabs always take you home**: tapping a tab always lands on its main page, clearing sub-pages, collapsing the player and closing sheets. Tapping the current tab again scrolls to the top.
 - **Plain search on Home**: the Home bar is a normal song/artist/playlist search; Arnav AI lives in its own tab.
 - **Floating player (picture-in-picture)**: leave the app mid-song and the player shrinks into a window with play/pause/skip. YouTube keeps playing only while that window is visible.
@@ -233,7 +233,7 @@ Arnav Music **does not**: extract stream URLs, use yt-dlp or similar, separate a
 - YouTube playback stops when the app is backgrounded (by design; one-tap handoff to YouTube Music).
 - With App Check **enforced** on AI Logic, APKs installed from GitHub (not Google Play) usually fail Play Integrity attestation, so Gemini is blocked and Arnav AI uses its on-device engine. Unenforce AI Logic in App Check to allow cloud AI for sideloaded installs, or distribute through Google Play.
 - “Energy” and “style” hints for YouTube tracks are estimated from public titles/tags and are labelled as estimates.
-- Lyrics appear for songs whose files embed them, or once you import/paste them. There's no free licensed online lyrics provider, so streaming tracks start without lyrics.
+- Online lyrics come from LRCLIB's community database (not a licensed provider). Coverage is very good for popular songs but not complete, and timing quality varies by contributor.
 - Google's At a Glance doesn't accept third-party content, so Arnav Music can't place a card there.
 - Android Auto shows only songs on your phone (YouTube can't play there). Sideloaded builds need *Unknown sources* turned on in Android Auto's developer settings.
 - Smart transitions fade between songs; they don't overlap two songs at once.

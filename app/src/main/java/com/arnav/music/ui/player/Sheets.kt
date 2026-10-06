@@ -255,7 +255,7 @@ fun SleepTimerSheet(current: SleepTimer?, onDismiss: () -> Unit, onSet: (SleepTi
 
 /**
  * Lyrics for any track from the actions menu. Lyrics come only from the user's own song file,
- * an .lrc/.txt they import, or text they paste — never from websites. When the track is the one
+ * an .lrc/.txt they import, text they paste, or LRCLIB (online, opt-out). When the track is the one
  * playing, the lyrics follow playback; otherwise every line is shown at rest.
  */
 @Composable

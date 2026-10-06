@@ -34,13 +34,20 @@ sealed interface LyricsState {
 }
 
 /**
- * Lyrics that live on this device only. Sources, all legitimate:
+ * Lyrics for a song, saved on this device. Sources, in order:
  * 1. lyrics embedded in the user's own local audio file (ID3 USLT/SYLT, FLAC Vorbis comment, MP4 ©lyr),
- * 2. an .lrc/.txt file the user picks with the system file picker,
- * 3. text the user pastes.
- * Nothing is ever fetched from the network.
+ * 2. an .lrc/.txt file the user picks with the system file picker, or text the user pastes,
+ * 3. LRCLIB, the open community lyrics database (when "Online lyrics" is on): fetched once and saved.
  */
-class LyricsRepository(private val context: Context, private val dao: LyricsDao) {
+class LyricsRepository(
+    private val context: Context,
+    private val dao: LyricsDao,
+    private val online: LrclibClient? = null,
+    private val onlineEnabled: () -> Boolean = { false },
+) {
+    private val misses = context.getSharedPreferences("lyrics_online_misses", Context.MODE_PRIVATE)
+    /** Songs being looked up right now, so the player and the mini player don't both ask. */
+    private val inflight: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     /** Tracks whose file was already scanned this process, so a file without lyrics is read once. */
     private val scanned: MutableSet<String> = ConcurrentHashMap.newKeySet()
@@ -52,10 +59,52 @@ class LyricsRepository(private val context: Context, private val dao: LyricsDao)
         if (saved == null && track.source == SourceType.LOCAL && scanned.add(id)) {
             scanEmbedded(track)
         }
+        if (saved == null) fetchOnlineIfNeeded(track)
         emitAll(dao.observe(id).map { toState(it, track) })
     }
         .catch { emit(LyricsState.None) }
         .distinctUntilChanged()
+
+    /**
+     * Looks the song up on LRCLIB unless lyrics are already saved, the user removed them, the setting
+     * is off, or LRCLIB recently had nothing (remembered for a week; instrumentals for 90 days).
+     */
+    private suspend fun fetchOnlineIfNeeded(track: Track, force: Boolean = false): Boolean {
+        val client = online ?: return false
+        if (!onlineEnabled()) return false
+        val id = track.id.value
+        val missedAt = misses.getLong(id, 0L)
+        val missTtl = if (misses.getBoolean("$id#instrumental", false)) INSTRUMENTAL_TTL_MS else MISS_TTL_MS
+        if (!force && missedAt > 0 && System.currentTimeMillis() - missedAt < missTtl) return false
+        if (!inflight.add(id)) return false
+        return try {
+            if (!force && dao.get(id) != null) return false
+            when (val found = client.find(track)) {
+                is OnlineLyrics.Found -> save(track, found.text, SOURCE_LRCLIB)
+                OnlineLyrics.Instrumental -> { misses.edit().putLong(id, System.currentTimeMillis()).putBoolean("$id#instrumental", true).apply(); false }
+                OnlineLyrics.NotFound -> { misses.edit().putLong(id, System.currentTimeMillis()).apply(); false }
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Offline or LRCLIB unreachable: try again next time, nothing remembered.
+            false
+        } finally {
+            inflight.remove(id)
+        }
+    }
+
+    /** "Search online again": clears a removal or a remembered miss and asks LRCLIB now. */
+    suspend fun searchOnline(track: Track): Boolean {
+        val id = track.id.value
+        misses.edit().remove(id).remove("$id#instrumental").apply()
+        val existing = runCatching { dao.get(id) }.getOrNull()
+        if (existing != null && existing.source == SOURCE_REMOVED) runCatching { dao.delete(id) }
+        return fetchOnlineIfNeeded(track, force = true)
+    }
+
+    /** Whether online lookups are available and switched on. */
+    val onlineAvailable: Boolean get() = online != null && onlineEnabled()
 
     /** Reads lyrics from the song file again (e.g. after the user removed them by mistake). */
     suspend fun rescanEmbedded(track: Track): Boolean {
@@ -86,11 +135,8 @@ class LyricsRepository(private val context: Context, private val dao: LyricsDao)
     suspend fun remove(track: Track) {
         val id = track.id.value
         try {
-            if (track.source == SourceType.LOCAL) {
-                dao.upsert(LyricsEntity(id, "", synced = false, source = SOURCE_REMOVED, updatedAt = System.currentTimeMillis()))
-            } else {
-                dao.delete(id)
-            }
+            // A marker row (not a delete) so neither the file nor LRCLIB brings them back by itself.
+            dao.upsert(LyricsEntity(id, "", synced = false, source = SOURCE_REMOVED, updatedAt = System.currentTimeMillis()))
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -185,6 +231,10 @@ class LyricsRepository(private val context: Context, private val dao: LyricsDao)
         const val SOURCE_EMBEDDED = "embedded"
         const val SOURCE_FILE = "file"
         const val SOURCE_PASTED = "pasted"
+        /** Fetched from LRCLIB (community lyrics) and saved on the device. */
+        const val SOURCE_LRCLIB = "lrclib"
+        private const val MISS_TTL_MS = 7L * 24 * 60 * 60 * 1000
+        private const val INSTRUMENTAL_TTL_MS = 90L * 24 * 60 * 60 * 1000
         /** Marker row: the user removed lyrics for a local file. Rendered as no lyrics. */
         const val SOURCE_REMOVED = "removed"
 

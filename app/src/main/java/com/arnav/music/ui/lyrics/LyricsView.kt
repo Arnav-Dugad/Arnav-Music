@@ -226,6 +226,16 @@ private fun LyricsHost(
         }
     }
     val rescan: (() -> Unit)? = if (track.source == SourceType.LOCAL) rescanFile else null
+    var searching by remember(track.id) { mutableStateOf(false) }
+    val searchOnline: (() -> Unit)? = if (repo.onlineAvailable) ({
+        if (!searching) scope.launch {
+            searching = true
+            notice = null
+            val found = repo.searchOnline(track)
+            searching = false
+            notice = if (found) null else "LRCLIB doesn't have lyrics for this song yet (or you're offline)."
+        }
+    }) else null
 
     Box(modifier) {
         AnimatedContent(
@@ -253,6 +263,8 @@ private fun LyricsHost(
                     onImport = openPicker,
                     onPaste = { openEditor("") },
                     onRescan = rescan,
+                    onSearchOnline = searchOnline,
+                    searching = searching,
                 )
                 is LyricsState.Ready -> {
                     val menu: @Composable () -> Unit = {
@@ -324,6 +336,7 @@ private fun sourceLabel(source: String): String = when (source) {
     LyricsRepository.SOURCE_EMBEDDED -> "From the song file"
     LyricsRepository.SOURCE_FILE -> "Imported by you"
     LyricsRepository.SOURCE_PASTED -> "Added by you"
+    LyricsRepository.SOURCE_LRCLIB -> "From LRCLIB · community lyrics"
     else -> "Saved on this device"
 }
 
@@ -914,6 +927,8 @@ private fun NoLyrics(
     onImport: () -> Unit,
     onPaste: () -> Unit,
     onRescan: (() -> Unit)?,
+    onSearchOnline: (() -> Unit)? = null,
+    searching: Boolean = false,
 ) {
     val local = track.source == SourceType.LOCAL
     Box(Modifier.fillMaxSize().padding(contentPadding), contentAlignment = Alignment.Center) {
@@ -939,10 +954,11 @@ private fun NoLyrics(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                if (local) {
-                    "There are no lyrics inside this song file. Add them from an .lrc or text file, or paste them — lines with timestamps will follow the music."
-                } else {
-                    "Lyrics come from your own song files, or you can add them yourself from an .lrc or text file, or by pasting them."
+                when {
+                    onSearchOnline != null && local -> "Neither the song file nor LRCLIB has lyrics for it. Add them from an .lrc or text file, or paste them — lines with timestamps will follow the music."
+                    onSearchOnline != null -> "LRCLIB doesn't have lyrics for this song yet. Add them from an .lrc or text file, or paste them — lines with timestamps will follow the music."
+                    local -> "There are no lyrics inside this song file. Add them from an .lrc or text file, or paste them — lines with timestamps will follow the music."
+                    else -> "Turn on Online lyrics in Settings → Playback, or add them from an .lrc or text file, or by pasting them."
                 },
                 style = ArnavTheme.type.bodySmall,
                 color = muted,
@@ -953,8 +969,14 @@ private fun NoLyrics(
                 PanelButton("Import .lrc file", Icons.Rounded.Description, onImport, filled = true, on = on)
                 PanelButton("Paste lyrics", Icons.Rounded.ContentPaste, onPaste, filled = false, on = on)
             }
-            if (onRescan != null) {
+            if (onSearchOnline != null) {
                 Spacer(Modifier.height(6.dp))
+                TextButton(onClick = onSearchOnline, enabled = !searching) {
+                    Text(if (searching) "Searching LRCLIB…" else "Search LRCLIB again", style = ArnavTheme.type.label, color = muted)
+                }
+            }
+            if (onRescan != null) {
+                Spacer(Modifier.height(if (onSearchOnline != null) 0.dp else 6.dp))
                 TextButton(onClick = onRescan) {
                     Text("Look in the song file again", style = ArnavTheme.type.label, color = muted)
                 }
@@ -965,7 +987,7 @@ private fun NoLyrics(
             }
             Spacer(Modifier.height(18.dp))
             Text(
-                "Arnav Music never copies lyrics from websites.",
+                if (onSearchOnline != null) "Online lyrics come from LRCLIB, an open community database." else "Lyrics stay on this device.",
                 style = ArnavTheme.type.caption,
                 color = muted.copy(alpha = muted.alpha * 0.8f),
                 textAlign = TextAlign.Center,

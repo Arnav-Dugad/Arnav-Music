@@ -261,6 +261,8 @@ private fun PlaybackPage(vm: SettingsViewModel) {
             ToggleRow("Picture-in-picture", s.floatingPlayer, { v -> vm.update { it.copy(floatingPlayer = v) } }, "Play, pause and skip right from the window")
             Divider()
             ToggleRow("Lyrics in the mini player", s.miniPlayerLyrics, { v -> vm.update { it.copy(miniPlayerLyrics = v) } }, "Shows the line being sung under the title when synced lyrics are available")
+            Divider()
+            ToggleRow("Online lyrics (LRCLIB)", s.onlineLyrics, { v -> vm.update { it.copy(onlineLyrics = v) } }, "Fetches time-synced lyrics from LRCLIB, an open community database, when a song has none on this device. Saved after the first look-up")
         }
         SettingsGroup("YouTube", footer = "Song plays the official audio upload (\"Topic\" art track) and Video plays the music video — switch any time in Now Playing. YouTube always plays in its official embedded player, which stays visible; for background listening continue in YouTube Music.") {
             ToggleRow("Prefer music videos", s.preferVideos, { v -> vm.update { it.copy(preferVideos = v) } }, "Off: songs first, like YouTube Music")

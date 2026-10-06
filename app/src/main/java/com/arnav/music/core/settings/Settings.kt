@@ -82,6 +82,8 @@ data class AppSettings(
     val miniPlayerLyrics: Boolean = true,
     /** Songs on this phone: begin the fade at the analysed outro and skip leading silence on the next song. */
     val smartTransitions: Boolean = true,
+    /** Look up lyrics on LRCLIB (open community database) when a song has none on the device. */
+    val onlineLyrics: Boolean = true,
 )
 
 class SettingsRepository(private val context: Context, scope: CoroutineScope) {
@@ -129,6 +131,7 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
         val analyzeAudio = booleanPreferencesKey("analyze_local_audio")
         val miniLyrics = booleanPreferencesKey("mini_player_lyrics")
         val smartTransitions = booleanPreferencesKey("smart_transitions")
+        val onlineLyrics = booleanPreferencesKey("online_lyrics")
     }
 
     private inline fun <reified E : Enum<E>> Preferences.enum(key: Preferences.Key<String>, default: E): E =
@@ -184,6 +187,7 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
                 analyzeLocalAudio = p[K.analyzeAudio] ?: d.analyzeLocalAudio,
                 miniPlayerLyrics = p[K.miniLyrics] ?: d.miniPlayerLyrics,
                 smartTransitions = p[K.smartTransitions] ?: d.smartTransitions,
+                onlineLyrics = p[K.onlineLyrics] ?: d.onlineLyrics,
             )
         }
         .onEach { _loaded.value = true }
@@ -233,6 +237,7 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
             p[K.analyzeAudio] = s.analyzeLocalAudio
             p[K.miniLyrics] = s.miniPlayerLyrics
             p[K.smartTransitions] = s.smartTransitions
+            p[K.onlineLyrics] = s.onlineLyrics
         }
     }
 
