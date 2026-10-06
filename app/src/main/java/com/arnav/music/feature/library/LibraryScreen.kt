@@ -1,5 +1,6 @@
 package com.arnav.music.feature.library
 
+import com.arnav.music.ui.sharedMorph
 import com.arnav.music.ui.sharedArt
 import com.arnav.music.ui.ArtKeys
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -261,10 +262,11 @@ fun LibraryScreen(vm: LibraryViewModel = koinViewModel(), importVm: PlaylistImpo
                 if (artists.isEmpty()) full { EmptyState(Icons.Rounded.LibraryMusic, "No artists yet", "Artists from your liked songs and device appear here.") }
                 items(artists, key = { it.key }, span = { if (grid) GridItemSpan(1) else GridItemSpan(maxLineSpan) }) { a ->
                     Row(Modifier.fillMaxWidth().clickable { nav.go(Routes.artist(a.name)) }.padding(horizontal = Space.gutter, vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
-                        Artwork(a.artworkUrl, a.key, Modifier.size(52.dp), CircleShape, decodeSize = 160)
+                        Artwork(a.artworkUrl, a.key, Modifier.sharedMorph(ArtKeys.artist(a.name), CircleShape).size(52.dp), CircleShape, decodeSize = 160)
                         Spacer(Modifier.width(Space.m))
                         Column(Modifier.weight(1f)) {
-                            Text(a.name, style = ArnavTheme.type.titleSmall, color = c.content, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(a.name, style = ArnavTheme.type.titleSmall, color = c.content, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.sharedMorph(ArtKeys.artistName(a.name)))
                             Text("${a.tracks} in your library", style = ArnavTheme.type.caption, color = c.contentMuted)
                         }
                     }
@@ -314,7 +316,7 @@ private fun LazyGridScope.albumItems(albums: List<AlbumSummary>) {
         val nav = LocalNavigator.current
         val c = ArnavTheme.colors
         Column(Modifier.padding(horizontal = Space.s).clip(RoundedCornerShape(Radius.m)).clickable { nav.go(Routes.album(a.id)) }) {
-            Artwork(a.artworkUrl, a.id, Modifier.sharedArt(albumArtKey(a.id)).fillMaxWidth().aspectRatio(1f), RoundedCornerShape(Radius.m), contentDescription = a.title, decodeSize = 300)
+            Artwork(a.artworkUrl, a.id, Modifier.sharedArt(albumArtKey(a.id)).fillMaxWidth().aspectRatio(1f), RoundedCornerShape(Radius.m), contentDescription = a.title, decodeSize = 720)
             Spacer(Modifier.height(Space.s))
             Text(a.title, style = ArnavTheme.type.titleSmall, color = c.content, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(

@@ -31,6 +31,21 @@ class AlbumViewModel(private val library: LibraryRepository) : ViewModel() {
     private var albumId: String? = null
     private var job: Job? = null
 
+    /**
+     * Fills the page synchronously when the device library is already in memory, so the hero cover
+     * and title exist on the very first frame and can catch a shared-element morph from the card
+     * that opened them. [load] then keeps it current. Call before collecting [ui].
+     */
+    fun prime(id: String) {
+        if (albumId == id || _ui.value.album != null) return
+        val warm = library.localTracks.value
+        if (warm.isEmpty()) return
+        val mine = warm.filter { it.albumId == id }
+        if (mine.isEmpty()) return
+        val summary = Albums.summary(id, mine)
+        _ui.value = AlbumUi(loading = false, album = summary, discs = Albums.discs(summary.tracks))
+    }
+
     fun load(id: String) {
         if (albumId == id && job != null) return
         albumId = id

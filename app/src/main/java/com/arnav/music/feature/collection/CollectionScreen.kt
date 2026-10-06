@@ -2,12 +2,15 @@ package com.arnav.music.feature.collection
 
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.runtime.derivedStateOf
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.material.icons.rounded.AddToHomeScreen
 import com.arnav.music.ui.theme.AccentScope
 import com.arnav.music.ui.sharedArt
+import com.arnav.music.ui.sharedMorph
 import com.arnav.music.ui.ArtKeys
+import com.arnav.music.ui.ArtOrigin
+import com.arnav.music.ui.artOrigin
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -234,15 +237,29 @@ fun CollectionScreen(kind: CollectionKind, id: String, vm: CollectionViewModel =
     }
 }
 
+/**
+ * An artist page. Its round header picks up the artist's avatar from wherever it was tapped
+ * (search results, library artists — keyed by [ArtKeys.artist] with the route's [from] origin) and
+ * the name morphs into the title. Their on-device albums open with a card → page morph, and plays
+ * fly the tapped cover into Now Playing.
+ */
 @Composable
-fun ArtistScreen(name: String, vm: CollectionViewModel = koinViewModel()) {
+fun ArtistScreen(name: String, from: String? = null, vm: CollectionViewModel = koinViewModel()) {
     val ui by vm.artist.collectAsStateWithLifecycle()
+    val albums by vm.artistAlbums.collectAsStateWithLifecycle()
     LaunchedEffect(name) { vm.loadArtist(name) }
     CollectionScaffold(
         title = ui.title.ifBlank { name }, subtitle = ui.subtitle, kindLabel = "Artist", description = "", tracks = ui.tracks, allTracks = ui.tracks,
         loading = ui.loading && ui.tracks.isEmpty(), youtube = ui.youtube, actions = {}, filter = "", onFilter = null, sort = SmartSort.DEFAULT, onSort = null,
         error = ui.error, onRemove = null, history = null, round = true,
-        afterHero = { ArtistHistorySection(name) },
+        // The avatar it came from rarely matches the header's cover mosaic, so it cross-fades as it grows.
+        sharedKey = ArtKeys.artist(name, from), crossfadeArt = true, titleKey = ArtKeys.artistName(name, from), flyRows = true,
+        afterHero = {
+            Column {
+                ArtistAlbumsSection(albums)
+                ArtistHistorySection(name)
+            }
+        },
         emptyTitle = "Nothing from $name yet", emptyBody = "Search YouTube for $name, or add their music to your device.",
     )
 }
@@ -258,6 +275,12 @@ private fun CollectionScaffold(
     pending: List<PendingMatchEntity> = emptyList(), matchingIds: Set<Long> = emptySet(),
     onPendingTap: ((PendingMatchEntity) -> Unit)? = null, onPendingRemove: ((PendingMatchEntity) -> Unit)? = null,
     sharedKey: String? = null,
+    /** The header art morphs its bounds and cross-fades (a different image came in) instead of travelling as-is. */
+    crossfadeArt: Boolean = false,
+    /** Shared key for the header title (e.g. an artist name label it came from). */
+    titleKey: String? = null,
+    /** Tapping a song flies its row cover into Now Playing (artist pages). */
+    flyRows: Boolean = false,
     /** Content placed right after the header (e.g. an artist's listening history). */
     afterHero: (@Composable () -> Unit)? = null,
     /** Extra content under the Play/Shuffle buttons (e.g. lyrics download progress). */
@@ -295,12 +318,15 @@ private fun CollectionScaffold(
                 }
             }
         }
-        var heroBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+        val heroArt = remember { ArtOrigin() }
+        val density = LocalDensity.current
+        val direction = LocalLayoutDirection.current
         // Play makes the cover fly from the header into Now Playing, whose colours take over the page.
         val playFromHero: (Boolean) -> Unit = { shuffle ->
             app.play(tracks, 0, shuffle = shuffle)
-            heroBounds?.let(nav.flyFrom)
+            if (collapse < 0.6f) heroArt.rect()?.let(nav.flyFrom)
         }
+        val heroShape = if (round) CircleShape else RoundedCornerShape(Radius.heroArtwork)
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = chrome.calculateBottomPadding() + Space.xl)) {
             item(key = "top") {
                 // Space for the pinned top bar drawn above the list.
@@ -309,8 +335,8 @@ private fun CollectionScaffold(
             item(key = "hero") {
                 Column(Modifier.fillMaxWidth().padding(horizontal = Space.gutter), horizontalAlignment = Alignment.CenterHorizontally) {
                     // Parallax: the cover drifts down slower than the list, shrinks and fades as it goes.
-                    Mosaic(art, title, Modifier.sharedArt(sharedKey).size(220.dp)
-                        .onGloballyPositioned { heroBounds = it.boundsInRoot() }
+                    val sharedHero = if (crossfadeArt) Modifier.sharedMorph(sharedKey, heroShape) else Modifier.sharedArt(sharedKey)
+                    Mosaic(art, title, sharedHero.size(220.dp)
                         .graphicsLayer {
                             val p = collapse
                             val hero = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == "hero" }
@@ -319,16 +345,18 @@ private fun CollectionScaffold(
                             scaleX = sc; scaleY = sc
                             alpha = 1f - 0.85f * p
                             shadowElevation = 24.dp.toPx() * (1f - p)
-                            shape = if (round) CircleShape else RoundedCornerShape(Radius.heroArtwork); clip = true
-                        },
-                        shape = if (round) CircleShape else RoundedCornerShape(Radius.heroArtwork))
+                            shape = heroShape; clip = true
+                        }
+                        .artOrigin(heroArt),
+                        shape = heroShape)
                     Spacer(Modifier.height(Space.xl))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(kindLabel.uppercase(), style = ArnavTheme.type.overline, color = c.contentMuted)
                         if (youtube) { Spacer(Modifier.width(Space.s)); SourceBadge(youtube = true) }
                     }
                     Spacer(Modifier.height(Space.xs))
-                    Text(title, style = ArnavTheme.type.display, color = c.content, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    Text(title, style = ArnavTheme.type.display, color = c.content, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        modifier = Modifier.sharedMorph(titleKey))
                     if (description.isNotBlank()) {
                         Spacer(Modifier.height(Space.xs))
                         Text(description, style = ArnavTheme.type.bodySmall, color = c.contentMuted, maxLines = 3, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
@@ -366,8 +394,13 @@ private fun CollectionScaffold(
                 allTracks.isEmpty() && pending.isEmpty() -> item { EmptyState(Icons.Rounded.MusicOff, emptyTitle, emptyBody) }
                 history != null && filter.isBlank() -> historyItems(history, playingId, liked)
                 else -> itemsIndexed(tracks, key = { _, t -> t.id.value }) { i, t ->
+                    val rowArt = remember { ArtOrigin() }
                     TrackRow(
-                        t, { app.play(tracks, i) }, Modifier.animateItem(), playing = t.id == playingId, liked = t.id in liked,
+                        t, {
+                            app.play(tracks, i)
+                            if (flyRows) rowArt.trackRowArtwork(density, direction)?.let(nav.flyFrom)
+                        },
+                        Modifier.animateItem().artOrigin(rowArt), playing = t.id == playingId, liked = t.id in liked,
                         onQueue = { app.addToQueue(t) },
                         onLike = if (onRemove != null) ({ onRemove(t) }) else ({ app.toggleLike(t) }),
                         leftSwipeRemoves = onRemove != null,

@@ -16,6 +16,8 @@ import com.arnav.music.core.youtube.YouTubeImporter
 import com.arnav.music.core.youtube.YouTubeRepository
 import com.arnav.music.domain.intelligence.ArtistHistories
 import com.arnav.music.domain.intelligence.SmartPlaylist
+import com.arnav.music.domain.library.AlbumSummary
+import com.arnav.music.domain.library.Albums
 import com.arnav.music.domain.model.ArtistKey
 import com.arnav.music.domain.model.Playlist
 import com.arnav.music.domain.model.PlaylistKind
@@ -336,11 +338,26 @@ class CollectionViewModel(
         val key = ArtistKey.of(name)
         val known = library.tracksByArtist(key) + library.localTracks.value.filter { it.artistKey == key }
         _artist.value = CollectionUi(loading = true, title = name, kindLabel = "Artist", tracks = known.distinctBy { it.id })
+        val local = runCatching { library.localTracksSnapshot() }.getOrDefault(emptyList())
+        _artistAlbums.value = withContext(Dispatchers.Default) { albumsOf(key, local) }
         val cached = youtube.cached(name, SearchFilter.TRACKS)
         val remote = cached ?: youtube.search(name, SearchFilter.TRACKS).getOrNull()
         val fromSearch = remote?.tracks.orEmpty().filter { it.artistKey == key || it.artist.contains(name, true) }
         val all = (known + fromSearch).distinctBy { it.id }
         _artist.value = CollectionUi(false, name, "${all.size} songs", "Artist", tracks = all, youtube = fromSearch.isNotEmpty())
+    }
+
+    // ---- Artist albums (on-device) ----
+    private val _artistAlbums = MutableStateFlow<List<AlbumSummary>>(emptyList())
+    /** On-device albums with songs by the open artist: their own albums first (newest first), then appearances. */
+    val artistAlbums: StateFlow<List<AlbumSummary>> = _artistAlbums.asStateFlow()
+
+    private fun albumsOf(key: String, local: List<Track>): List<AlbumSummary> {
+        if (key.isEmpty()) return emptyList()
+        val ids = local.filter { it.artistKey == key || it.albumArtist?.let { a -> ArtistKey.of(a) } == key }.mapNotNull { it.albumId }.toSet()
+        if (ids.isEmpty()) return emptyList()
+        return Albums.group(local.filter { t -> t.albumId?.let { it in ids } == true })
+            .sortedWith(compareBy<AlbumSummary> { ArtistKey.of(it.artist) != key }.thenByDescending { it.year ?: 0 }.thenBy { it.title.lowercase() })
     }
 
     // ---- Artist listening history (see ArtistHistorySection) ----

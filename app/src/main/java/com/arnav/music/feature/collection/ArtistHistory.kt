@@ -39,7 +39,10 @@ import com.arnav.music.domain.format.Formatters
 import com.arnav.music.domain.intelligence.ArtistHistory
 import com.arnav.music.domain.intelligence.MonthMinutes
 import com.arnav.music.domain.model.Track
+import com.arnav.music.ui.ArtOrigin
 import com.arnav.music.ui.LocalAppViewModel
+import com.arnav.music.ui.LocalNavigator
+import com.arnav.music.ui.artOrigin
 import com.arnav.music.ui.components.Artwork
 import com.arnav.music.ui.theme.ArnavTheme
 import com.arnav.music.ui.theme.GlassMaterial
@@ -181,19 +184,22 @@ private fun MonthBars(months: List<MonthMinutes>) {
 private fun TopSongs(top: List<Pair<Track, Int>>) {
     val c = ArnavTheme.colors
     val app = LocalAppViewModel.current
+    val nav = LocalNavigator.current
     val tracks = remember(top) { top.map { it.first } }
     Column {
         Text("Most played", style = ArnavTheme.type.caption, color = c.contentMuted)
         Spacer(Modifier.height(Space.xs))
         top.forEachIndexed { i, (t, plays) ->
+            // The tapped song's cover flies into Now Playing.
+            val art = remember(t.id) { ArtOrigin() }
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.s))
-                    .clickable(role = Role.Button, onClickLabel = "Play ${t.title}") { app.play(tracks, i) }
+                    .clickable(role = Role.Button, onClickLabel = "Play ${t.title}") { app.play(tracks, i); art.rect()?.let(nav.flyFrom) }
                     .padding(vertical = Space.xs),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("${i + 1}", style = ArnavTheme.type.numeric, color = c.contentSubtle, modifier = Modifier.width(20.dp))
-                Box(Modifier.size(40.dp).clip(RoundedCornerShape(Radius.xs))) {
+                Box(Modifier.size(40.dp).clip(RoundedCornerShape(Radius.xs)).artOrigin(art)) {
                     Artwork(t.artworkUrl, t.id.value, Modifier.size(40.dp), RoundedCornerShape(Radius.xs), decodeSize = 120)
                 }
                 Spacer(Modifier.width(Space.m))

@@ -1,5 +1,7 @@
 package com.arnav.music.feature.explore
 
+import com.arnav.music.ui.sharedMorph
+import com.arnav.music.ui.ArtKeys
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -194,9 +196,10 @@ private fun androidx.compose.foundation.lazy.LazyListScope.resultsSection(
                     items(r.artists, key = { it.key }) { a ->
                         val nav = LocalNavigator.current
                         Column(Modifier.width(92.dp).clip(RoundedCornerShape(Radius.m)).clickable { nav.go(Routes.artist(a.name)) }, horizontalAlignment = Alignment.CenterHorizontally) {
-                            Artwork(a.artworkUrl, a.key, Modifier.size(84.dp), CircleShape, decodeSize = 200)
+                            Artwork(a.artworkUrl, a.key, Modifier.sharedMorph(ArtKeys.artist(a.name), CircleShape).size(84.dp), CircleShape, decodeSize = 200)
                             Spacer(Modifier.height(Space.s))
-                            Text(a.name, style = ArnavTheme.type.label, color = ArnavTheme.colors.content, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                            Text(a.name, style = ArnavTheme.type.label, color = ArnavTheme.colors.content, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                                modifier = Modifier.sharedMorph(ArtKeys.artistName(a.name)))
                         }
                     }
                 }

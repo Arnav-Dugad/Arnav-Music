@@ -39,6 +39,10 @@ import com.arnav.music.feature.settings.SettingsScreen
 import com.arnav.music.ui.theme.ArnavTheme
 import com.arnav.music.ui.theme.Easing
 
+/** Optional shared-element origin on detail routes (see [ArtRoutes]). */
+private const val FROM_QUERY = "?from={from}"
+private fun fromArgument() = navArgument(ArtRoutes.FROM) { type = NavType.StringType; nullable = true; defaultValue = null }
+
 /** A destination whose content can take part in shared-element artwork transitions. */
 private fun NavGraphBuilder.screen(
     route: String,
@@ -60,22 +64,24 @@ fun AppNavHost(nav: NavHostController) {
         startDestination = Routes.HOME,
         // Spatial hierarchy: deeper screens slide in from the trailing edge with a slight
         // depth shift; top-level tabs crossfade in place.
+        // Reduced motion: every page change is a plain cross-fade (shared-element morphs are off too).
         enterTransition = {
             val top = targetState.destination.route in Routes.topLevel
-            if (top) fadeIn(motion.fast()) + scaleIn(motion.fast(), 0.985f)
+            if (motion.reduced) fadeIn(motion.fast())
+            else if (top) fadeIn(motion.fast()) + scaleIn(motion.fast(), 0.985f)
             else slideInHorizontally(motion.offsetSpring()) { (it * 0.18f * travel).toInt() } + fadeIn(androidx.compose.animation.core.tween(220, easing = Easing.Emphasized))
         },
         exitTransition = {
             val top = targetState.destination.route in Routes.topLevel
-            if (top) fadeOut(motion.fast()) else fadeOut(motion.fast()) + scaleOut(motion.fast(), 0.97f)
+            if (top || motion.reduced) fadeOut(motion.fast()) else fadeOut(motion.fast()) + scaleOut(motion.fast(), 0.97f)
         },
         // Android 15-style predictive back: while you swipe, the page shrinks toward the swipe edge and
         // the one underneath rises from slightly behind. Tweens so the gesture can scrub them linearly.
         popEnterTransition = {
-            fadeIn(androidx.compose.animation.core.tween(300)) + scaleIn(androidx.compose.animation.core.tween(300, easing = Easing.Emphasized), if (motion.reduced) 1f else 0.94f)
+            if (motion.reduced) fadeIn(motion.fast()) else fadeIn(androidx.compose.animation.core.tween(300)) + scaleIn(androidx.compose.animation.core.tween(300, easing = Easing.Emphasized), if (motion.reduced) 1f else 0.94f)
         },
         popExitTransition = {
-            scaleOut(androidx.compose.animation.core.tween(300, easing = Easing.Emphasized), if (motion.reduced) 1f else 0.9f) +
+            if (motion.reduced) fadeOut(motion.fast()) else scaleOut(androidx.compose.animation.core.tween(300, easing = Easing.Emphasized), if (motion.reduced) 1f else 0.9f) +
                 slideOutHorizontally(androidx.compose.animation.core.tween(300, easing = Easing.Emphasized)) { (it * 0.12f * travel).toInt() } +
                 fadeOut(androidx.compose.animation.core.tween(240))
         },
@@ -93,8 +99,10 @@ fun AppNavHost(nav: NavHostController) {
             val kind = runCatching { CollectionKind.valueOf(it.arguments?.getString("kind").orEmpty()) }.getOrDefault(CollectionKind.LIKED)
             CollectionScreen(kind, it.arguments?.getString("id").orEmpty())
         }
-        screen(Routes.ARTIST, arguments = listOf(navArgument("name") { type = NavType.StringType })) {
-            ArtistScreen(it.arguments?.getString("name").orEmpty())
+        // Artist and album pages accept an optional "?from=" origin (see ArtRoutes) so shared-element
+        // keys can be scoped to the section the user tapped; plain Routes.artist/album still match.
+        screen(Routes.ARTIST + FROM_QUERY, arguments = listOf(navArgument("name") { type = NavType.StringType }, fromArgument())) {
+            ArtistScreen(it.arguments?.getString("name").orEmpty(), from = it.arguments?.getString(ArtRoutes.FROM))
         }
         screen(Routes.MOMENT, arguments = listOf(navArgument("id") { type = NavType.StringType })) {
             MomentScreen(it.arguments?.getString("id").orEmpty())
@@ -106,8 +114,8 @@ fun AppNavHost(nav: NavHostController) {
         screen(Routes.AUTH) { AuthScreen() }
         screen(Routes.DUPLICATES) { DuplicatesScreen() }
         screen(Routes.IMPORTS) { ImportHistoryScreen() }
-        screen(Routes.ALBUM, arguments = listOf(navArgument("albumId") { type = NavType.StringType })) {
-            AlbumScreen(it.arguments?.getString("albumId").orEmpty())
+        screen(Routes.ALBUM + FROM_QUERY, arguments = listOf(navArgument("albumId") { type = NavType.StringType }, fromArgument())) {
+            AlbumScreen(it.arguments?.getString("albumId").orEmpty(), from = it.arguments?.getString(ArtRoutes.FROM))
         }
         screen(Routes.CREDITS, arguments = listOf(navArgument("trackId") { type = NavType.StringType })) {
             CreditsScreen(it.arguments?.getString("trackId").orEmpty())

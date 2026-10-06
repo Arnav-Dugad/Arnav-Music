@@ -66,7 +66,11 @@ import com.arnav.music.ui.components.PrimaryButton
 import com.arnav.music.ui.components.SecondaryButton
 import com.arnav.music.ui.components.TrackRowSkeleton
 import com.arnav.music.ui.player.SheetRequest
+import com.arnav.music.ui.ArtKeys
+import com.arnav.music.ui.ArtOrigin
+import com.arnav.music.ui.artOrigin
 import com.arnav.music.ui.sharedArt
+import com.arnav.music.ui.sharedMorph
 import com.arnav.music.ui.theme.AccentScope
 import com.arnav.music.ui.theme.ArnavTheme
 import com.arnav.music.ui.theme.GlassMaterial
@@ -76,14 +80,19 @@ import com.arnav.music.ui.theme.glass
 import org.koin.compose.viewmodel.koinViewModel
 
 /** Shared-element key for an album cover (library grid → album hero). */
-fun albumArtKey(albumId: String) = "art-album-$albumId"
+fun albumArtKey(albumId: String) = ArtKeys.album(albumId)
 
 /**
  * An album of on-device songs: a collapsing hero (cover, title, album artist, year · songs ·
  * length), Play/Shuffle, then the songs under "Disc 1 / Disc 2" headers with their track numbers.
+ *
+ * [from] is the section of the previous screen whose card opened this page (see ArtRoutes): the
+ * card's container, cover and title then morph into the page, the hero and its title.
  */
 @Composable
-fun AlbumScreen(albumId: String, vm: AlbumViewModel = koinViewModel()) {
+fun AlbumScreen(albumId: String, from: String? = null, vm: AlbumViewModel = koinViewModel()) {
+    // Fill synchronously when possible, so the hero exists on the first frame of the morph.
+    remember(albumId) { vm.prime(albumId); albumId }
     val ui by vm.ui.collectAsStateWithLifecycle()
     val app = LocalAppViewModel.current
     val nav = LocalNavigator.current
@@ -99,10 +108,22 @@ fun AlbumScreen(albumId: String, vm: AlbumViewModel = koinViewModel()) {
     val collapsed by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > heroPx } }
     val barAlpha by animateFloatAsState(if (collapsed) 1f else 0f, ArnavTheme.motion.fast(), label = "albumBar")
     val playingId = player.current?.id
+    // Plays fly the hero cover into Now Playing while it is still (mostly) on screen.
+    val heroArt = remember { ArtOrigin() }
+    val play: (Int, Boolean) -> Unit = { index, shuffle ->
+        app.play(ui.tracks, index, shuffle = shuffle)
+        val coverShown = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset < heroPx * 0.6f
+        if (coverShown) heroArt.rect()?.let(nav.flyFrom)
+    }
+    // Opened from a card: the page itself grows out of that card's container (and shrinks back).
+    val cardKey = from?.let { ArtKeys.albumCard(albumId, it) }
 
     AccentScope(if (album?.artworkUrl == null) null else Color(palette.accent)) {
         val c = ArnavTheme.colors
-        Box(Modifier.fillMaxSize()) {
+        Box(
+            Modifier.sharedMorph(cardKey, RoundedCornerShape(Radius.m)).fillMaxSize()
+                .then(if (cardKey != null) Modifier.background(c.background) else Modifier),
+        ) {
             Box(
                 Modifier.fillMaxWidth().height(460.dp)
                     .graphicsLayer { translationY = if (listState.firstVisibleItemIndex == 0) -listState.firstVisibleItemScrollOffset * 0.4f else -460.dp.toPx() }
@@ -113,7 +134,7 @@ fun AlbumScreen(albumId: String, vm: AlbumViewModel = koinViewModel()) {
                     Column {
                         // Room for the back button bar drawn on top.
                         Spacer(Modifier.statusBarsPadding().height(Space.touch))
-                        if (album != null) Hero(album, albumId, listState, heroPx, onArtist = { nav.go(Routes.artist(it)) }, onPlay = { shuffle -> app.play(ui.tracks, 0, shuffle = shuffle) })
+                        if (album != null) Hero(album, albumId, from, heroArt, listState, heroPx, onArtist = { nav.go(Routes.artist(it)) }, onPlay = { shuffle -> play(0, shuffle) })
                     }
                 }
                 when {
@@ -136,7 +157,7 @@ fun AlbumScreen(albumId: String, vm: AlbumViewModel = koinViewModel()) {
                                     track = t,
                                     albumArtist = album.artist,
                                     playing = t.id == playingId,
-                                    onClick = { app.play(all, all.indexOf(t).coerceAtLeast(0)) },
+                                    onClick = { play(all.indexOf(t).coerceAtLeast(0), false) },
                                     onMore = { nav.openSheet(SheetRequest.TrackActions(t)) },
                                 )
                             }
@@ -178,12 +199,16 @@ fun AlbumScreen(albumId: String, vm: AlbumViewModel = koinViewModel()) {
 }
 
 @Composable
-private fun Hero(album: AlbumSummary, albumId: String, listState: LazyListState, heroPx: Float, onArtist: (String) -> Unit, onPlay: (Boolean) -> Unit) {
+private fun Hero(
+    album: AlbumSummary, albumId: String, from: String?, art: ArtOrigin, listState: LazyListState, heroPx: Float,
+    onArtist: (String) -> Unit, onPlay: (Boolean) -> Unit,
+) {
     val c = ArnavTheme.colors
     Column(Modifier.fillMaxWidth().padding(horizontal = Space.gutter), horizontalAlignment = Alignment.CenterHorizontally) {
         Artwork(
             album.artworkUrl, album.id,
-            Modifier.sharedArt(albumArtKey(albumId)).size(240.dp)
+            // Above the page's container morph while both are in flight.
+            Modifier.sharedArt(ArtKeys.album(albumId, from), zIndex = 1f).size(240.dp)
                 .graphicsLayer {
                     // The cover sinks, shrinks and fades as it scrolls under the bar (read here, not in composition).
                     val first = listState.firstVisibleItemIndex == 0
@@ -196,7 +221,8 @@ private fun Hero(album: AlbumSummary, albumId: String, listState: LazyListState,
                     shadowElevation = 24.dp.toPx()
                     shape = RoundedCornerShape(Radius.heroArtwork)
                     clip = true
-                },
+                }
+                .artOrigin(art),
             RoundedCornerShape(Radius.heroArtwork),
             contentDescription = "Cover of ${album.title}",
             decodeSize = 720,
@@ -204,7 +230,10 @@ private fun Hero(album: AlbumSummary, albumId: String, listState: LazyListState,
         Spacer(Modifier.height(Space.xl))
         Text("ALBUM", style = ArnavTheme.type.overline, color = c.contentMuted)
         Spacer(Modifier.height(Space.xs))
-        Text(album.title, style = ArnavTheme.type.display, color = c.content, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+        Text(
+            album.title, style = ArnavTheme.type.display, color = c.content, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+            modifier = Modifier.sharedMorph(ArtKeys.albumTitle(albumId, from), zIndex = 1f),
+        )
         Spacer(Modifier.height(Space.xs))
         val various = album.artist == Albums.VARIOUS
         Text(
