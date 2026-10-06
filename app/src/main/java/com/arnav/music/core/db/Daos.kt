@@ -134,3 +134,39 @@ interface KvSyncDao {
     @Upsert suspend fun put(e: KvSyncEntity)
     @Query("SELECT * FROM kv_sync WHERE dirty = 1") suspend fun dirty(): List<KvSyncEntity>
 }
+
+@Dao
+interface LyricsDao {
+    @Query("SELECT * FROM lyrics WHERE trackId = :trackId") suspend fun get(trackId: String): LyricsEntity?
+    @Query("SELECT * FROM lyrics WHERE trackId = :trackId") fun observe(trackId: String): Flow<LyricsEntity?>
+    @Upsert suspend fun upsert(lyrics: LyricsEntity)
+    @Query("DELETE FROM lyrics WHERE trackId = :trackId") suspend fun delete(trackId: String)
+}
+
+/** Light projection of [AudioFeaturesEntity] without the envelope blob. */
+data class FeatureSummary(val trackId: String, val bpm: Float, val loudnessDb: Float, val energy: Float)
+
+@Dao
+interface AudioFeaturesDao {
+    @Query("SELECT * FROM audio_features WHERE trackId = :trackId") suspend fun get(trackId: String): AudioFeaturesEntity?
+    @Query("SELECT * FROM audio_features WHERE trackId = :trackId") fun observe(trackId: String): Flow<AudioFeaturesEntity?>
+    @Query("SELECT trackId, bpm, loudnessDb, energy FROM audio_features WHERE ok = 1") fun summaries(): Flow<List<FeatureSummary>>
+    @Query("SELECT trackId FROM audio_features WHERE version = :version") suspend fun analyzedIds(version: Int): List<String>
+    @Query("SELECT COUNT(*) FROM audio_features WHERE ok = 1") fun analyzedCount(): Flow<Int>
+    @Upsert suspend fun upsert(features: AudioFeaturesEntity)
+    @Query("DELETE FROM audio_features") suspend fun clear()
+}
+
+@Dao
+interface PendingMatchDao {
+    @Insert suspend fun insertAll(items: List<PendingMatchEntity>)
+    @Query("SELECT * FROM pending_matches WHERE failed = 0 ORDER BY createdAt, playlistId, position LIMIT :limit")
+    suspend fun next(limit: Int): List<PendingMatchEntity>
+    @Query("SELECT * FROM pending_matches WHERE playlistId = :playlistId ORDER BY position") fun forPlaylist(playlistId: String): Flow<List<PendingMatchEntity>>
+    @Query("SELECT * FROM pending_matches WHERE id = :id") suspend fun get(id: Long): PendingMatchEntity?
+    @Query("SELECT COUNT(*) FROM pending_matches WHERE failed = 0") fun openCount(): Flow<Int>
+    @Query("SELECT COUNT(*) FROM pending_matches WHERE failed = 0") suspend fun openCountNow(): Int
+    @Query("UPDATE pending_matches SET attempts = attempts + 1, failed = :failed WHERE id = :id") suspend fun markAttempt(id: Long, failed: Boolean)
+    @Query("DELETE FROM pending_matches WHERE id = :id") suspend fun delete(id: Long)
+    @Query("DELETE FROM pending_matches WHERE playlistId = :playlistId") suspend fun deleteForPlaylist(playlistId: String)
+}

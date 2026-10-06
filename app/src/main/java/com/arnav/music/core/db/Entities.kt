@@ -120,3 +120,52 @@ data class KvSyncEntity(
     val updatedAt: Long,
     val dirty: Boolean,
 )
+
+/** Lyrics saved on this device: embedded in a local file, or imported/pasted by the user. Never synced. */
+@Entity(tableName = "lyrics")
+data class LyricsEntity(
+    @PrimaryKey val trackId: String,
+    /** Raw LRC (synced) or plain text. */
+    val text: String,
+    val synced: Boolean,
+    /** "embedded", "file", "pasted". */
+    val source: String,
+    val updatedAt: Long,
+)
+
+/** On-device audio analysis of a local file (tempo, loudness, energy curve). */
+@Entity(tableName = "audio_features")
+data class AudioFeaturesEntity(
+    @PrimaryKey val trackId: String,
+    /** Beats per minute; 0 when no steady beat was found. */
+    val bpm: Float,
+    /** Time of the first beat, for phase-locking visuals to the music. */
+    val beatOffsetMs: Long,
+    /** Integrated loudness, approximate LUFS. */
+    val loudnessDb: Float,
+    /** 0..1 energy from loudness, onset density and tempo. */
+    val energy: Float,
+    /** Energy envelope, one unsigned byte per [com.arnav.music.core.analysis.AudioFeatures.ENVELOPE_STEP_MS]. */
+    val envelope: ByteArray,
+    val analyzedAt: Long,
+    /** Analyzer version; rows from older versions are re-analyzed. */
+    val version: Int,
+    /** False when the file couldn't be decoded (not retried until the version changes). */
+    val ok: Boolean,
+)
+
+/** A song from a Spotify/CSV import still waiting to be matched to a YouTube upload. */
+@Entity(tableName = "pending_matches", indices = [Index("playlistId")])
+data class PendingMatchEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val playlistId: String,
+    val position: Int,
+    val title: String,
+    val artist: String,
+    val album: String?,
+    val durationMs: Long,
+    val attempts: Int = 0,
+    /** True once a search found nothing suitable; shown as "No match" and skipped. */
+    val failed: Boolean = false,
+    val createdAt: Long,
+)

@@ -9,9 +9,9 @@ import androidx.room.RoomDatabase
     entities = [
         TrackEntity::class, LikeEntity::class, PlaylistEntity::class, PlaylistTrackEntity::class,
         PlayEventEntity::class, SearchCacheEntity::class, RecentSearchEntity::class, AiCacheEntity::class,
-        KvSyncEntity::class,
+        KvSyncEntity::class, LyricsEntity::class, AudioFeaturesEntity::class, PendingMatchEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class ArnavDatabase : RoomDatabase() {
@@ -22,6 +22,9 @@ abstract class ArnavDatabase : RoomDatabase() {
     abstract fun search(): SearchDao
     abstract fun aiCache(): AiCacheDao
     abstract fun kv(): KvSyncDao
+    abstract fun lyrics(): LyricsDao
+    abstract fun audioFeatures(): AudioFeaturesDao
+    abstract fun pendingMatches(): PendingMatchDao
 
     companion object {
         const val NAME = "arnav-music.db"
@@ -34,9 +37,18 @@ abstract class ArnavDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE tracks ADD COLUMN compilation INTEGER NOT NULL DEFAULT 0")
             }
         }
+        /** v3: on-device lyrics, local audio analysis, Spotify/CSV import queue. */
+        val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `lyrics` (`trackId` TEXT NOT NULL, `text` TEXT NOT NULL, `synced` INTEGER NOT NULL, `source` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`trackId`))")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `audio_features` (`trackId` TEXT NOT NULL, `bpm` REAL NOT NULL, `beatOffsetMs` INTEGER NOT NULL, `loudnessDb` REAL NOT NULL, `energy` REAL NOT NULL, `envelope` BLOB NOT NULL, `analyzedAt` INTEGER NOT NULL, `version` INTEGER NOT NULL, `ok` INTEGER NOT NULL, PRIMARY KEY(`trackId`))")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `pending_matches` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `playlistId` TEXT NOT NULL, `position` INTEGER NOT NULL, `title` TEXT NOT NULL, `artist` TEXT NOT NULL, `album` TEXT, `durationMs` INTEGER NOT NULL, `attempts` INTEGER NOT NULL, `failed` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_pending_matches_playlistId` ON `pending_matches` (`playlistId`)")
+            }
+        }
         fun build(context: Context): ArnavDatabase =
             Room.databaseBuilder(context, ArnavDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .fallbackToDestructiveMigrationOnDowngrade(true)
                 .build()
     }

@@ -70,6 +70,14 @@ data class AppSettings(
     val preferVideos: Boolean = false,
     /** Replace unplayable YouTube uploads with another upload of the same song automatically. */
     val autoReplaceUnavailable: Boolean = true,
+    /** Picture-in-picture player when leaving the app mid-song (keeps YouTube visible, as required). */
+    val floatingPlayer: Boolean = true,
+    /** Gentle beat-synced pulses in the Now Playing backdrop for analyzed on-device songs. */
+    val beatVisuals: Boolean = true,
+    /** OLED: after a few idle seconds in Now Playing, dim to a hairline progress glow around the screen edge. */
+    val ambientEdgeGlow: Boolean = true,
+    /** Analyze on-device songs for tempo and loudness while charging. */
+    val analyzeLocalAudio: Boolean = true,
 )
 
 class SettingsRepository(private val context: Context, scope: CoroutineScope) {
@@ -111,6 +119,10 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
         val autoInstall = booleanPreferencesKey("auto_install_updates")
         val preferVideos = booleanPreferencesKey("prefer_videos")
         val autoReplace = booleanPreferencesKey("auto_replace_unavailable")
+        val floatingPlayer = booleanPreferencesKey("floating_player")
+        val beatVisuals = booleanPreferencesKey("beat_visuals")
+        val ambientGlow = booleanPreferencesKey("ambient_edge_glow")
+        val analyzeAudio = booleanPreferencesKey("analyze_local_audio")
     }
 
     private inline fun <reified E : Enum<E>> Preferences.enum(key: Preferences.Key<String>, default: E): E =
@@ -160,6 +172,10 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
                 autoInstallUpdates = p[K.autoInstall] ?: d.autoInstallUpdates,
                 preferVideos = p[K.preferVideos] ?: d.preferVideos,
                 autoReplaceUnavailable = p[K.autoReplace] ?: d.autoReplaceUnavailable,
+                floatingPlayer = p[K.floatingPlayer] ?: d.floatingPlayer,
+                beatVisuals = p[K.beatVisuals] ?: d.beatVisuals,
+                ambientEdgeGlow = p[K.ambientGlow] ?: d.ambientEdgeGlow,
+                analyzeLocalAudio = p[K.analyzeAudio] ?: d.analyzeLocalAudio,
             )
         }
         .onEach { _loaded.value = true }
@@ -203,6 +219,10 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
             p[K.autoInstall] = s.autoInstallUpdates
             p[K.preferVideos] = s.preferVideos
             p[K.autoReplace] = s.autoReplaceUnavailable
+            p[K.floatingPlayer] = s.floatingPlayer
+            p[K.beatVisuals] = s.beatVisuals
+            p[K.ambientGlow] = s.ambientEdgeGlow
+            p[K.analyzeAudio] = s.analyzeLocalAudio
         }
     }
 
