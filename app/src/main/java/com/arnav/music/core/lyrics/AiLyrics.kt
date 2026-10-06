@@ -246,7 +246,7 @@ class AiLyrics(
             AiUnavailableReason.DAILY_LIMIT -> "Today's Arnav AI limit is used up. Try again tomorrow, or raise it in Settings → Arnav AI."
             AiUnavailableReason.THROTTLED -> "Arnav AI is busy with another request. Try again in a moment."
             AiUnavailableReason.QUOTA -> "Arnav AI is resting after a lot of requests. Try again in an hour."
-            AiUnavailableReason.APP_CHECK -> "This copy of the app can't use Arnav AI right now."
+            AiUnavailableReason.APP_CHECK -> "App Check blocked cloud AI on this install. Settings → Arnav AI → Cloud AI on this phone fixes it."
             AiUnavailableReason.OFFLINE -> "You're offline. Arnav AI needs a connection."
             AiUnavailableReason.TIMEOUT -> "Arnav AI took too long. Try again."
             AiUnavailableReason.MALFORMED, AiUnavailableReason.ERROR -> GENERIC_FAILURE

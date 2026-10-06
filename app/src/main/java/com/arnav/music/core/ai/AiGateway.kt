@@ -73,6 +73,13 @@ class AiGateway(
     @Volatile var lastError: String? = null
         private set
 
+    /** Forgets App Check / quota back-off, e.g. after the App Check setup changed. */
+    fun clearBackoff() {
+        appCheckBlockedUntil = 0L
+        quotaBlockedUntil = 0L
+        lastError = null
+    }
+
     fun availability(): AiUnavailableReason? {
         val s = settings.settings.value
         return when {

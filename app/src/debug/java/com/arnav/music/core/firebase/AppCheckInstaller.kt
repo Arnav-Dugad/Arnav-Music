@@ -1,5 +1,6 @@
 package com.arnav.music.core.firebase
 
+import android.content.Context
 import com.google.firebase.appcheck.FirebaseAppCheck
 import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
 
@@ -9,5 +10,6 @@ import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
  */
 internal object AppCheckInstaller {
     const val PROVIDER = "Debug provider"
-    fun install() = FirebaseAppCheck.getInstance().installAppCheckProviderFactory(DebugAppCheckProviderFactory.getInstance())
+    @Suppress("UNUSED_PARAMETER")
+    fun install(context: Context) = FirebaseAppCheck.getInstance().installAppCheckProviderFactory(DebugAppCheckProviderFactory.getInstance())
 }

@@ -48,6 +48,7 @@ class SettingsViewModel(
     val cloudAvailable: Boolean get() = auth.isAvailable
     val lastSyncedAt: Long get() = sync.lastSyncedAt
     val lastAiError: String? get() = ai.lastError
+    fun clearAiBackoff() = ai.clearBackoff()
 
     private val _apiKeyPresent = MutableStateFlow(!secure.get(SecureStore.YOUTUBE_API_KEY).isNullOrBlank())
     val apiKeyPresent: StateFlow<Boolean> = _apiKeyPresent.asStateFlow()

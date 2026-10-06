@@ -17,3 +17,10 @@
 -dontwarn org.bouncycastle.**
 -dontwarn org.conscrypt.**
 -dontwarn org.openjsse.**
+
+# Release builds drop debug/verbose logging, including libraries' (e.g. the App Check debug
+# provider prints its secret at debug level).
+-assumenosideeffects class android.util.Log {
+    public static int d(...);
+    public static int v(...);
+}

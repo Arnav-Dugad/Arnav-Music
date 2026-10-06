@@ -13,7 +13,7 @@ class FirebaseGate(private val context: Context) {
     @Volatile private var initialised = false
     @Volatile private var available = false
 
-    val appCheckProvider: String get() = AppCheckInstaller.PROVIDER
+    val appCheckProvider: String get() = if (AppCheckDebugToken.isOn(context)) "Debug token" else AppCheckInstaller.PROVIDER
 
     val isAvailable: Boolean
         get() {
@@ -31,7 +31,7 @@ class FirebaseGate(private val context: Context) {
             if (app != null) {
                 runCatching {
                     // App Check (free) protects Firestore / AI Logic from abuse by non-genuine clients.
-                    AppCheckInstaller.install()
+                    AppCheckInstaller.install(context)
                 }
             }
             app != null

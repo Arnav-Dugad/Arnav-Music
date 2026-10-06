@@ -277,6 +277,10 @@ private fun PlaybackPage(vm: SettingsViewModel) {
             ToggleRow("Online lyrics (LRCLIB)", s.onlineLyrics, { v -> vm.update { it.copy(onlineLyrics = v) } }, "Fetches time-synced lyrics from LRCLIB, an open community database, when a song has none on this device. Saved after the first look-up")
         }
         SettingsGroup("YouTube", footer = "Song plays the official audio upload (\"Topic\" art track) and Video plays the music video — switch any time in Now Playing. YouTube always plays in its official embedded player, which stays visible; for background listening continue in YouTube Music.") {
+            ToggleRow("Moving cover colours", s.movingGradient, { v -> vm.update { it.copy(movingGradient = v) } }, "Now Playing's background slowly drifts through the cover's colours (songs on this phone)")
+            ToggleRow("Double-tap to skip 5 seconds", s.doubleTapSeek, { v -> vm.update { it.copy(doubleTapSeek = v) } }, "Double-tap the left or right of the cover to go back or forward")
+            ToggleRow("Particle cover changes", s.coverParticles, { v -> vm.update { it.copy(coverParticles = v) } }, "Covers dissolve into particles and rebuild when the song changes (off with reduced motion)")
+            ToggleRow("Haptics on the beat drop", s.beatDropHaptics, { v -> vm.update { it.copy(beatDropHaptics = v) } }, "A pulse you can feel when the beat drops, for analysed songs on this phone")
             ToggleRow("Crop cover-art videos", s.cropArtTracks, { v -> vm.update { it.copy(cropArtTracks = v) } }, "Song uploads that are just album art show as a clean square, without the black side bars")
             Divider()
             ToggleRow("Prefer music videos", s.preferVideos, { v -> vm.update { it.copy(preferVideos = v) } }, "Off: songs first, like YouTube Music")
@@ -304,6 +308,7 @@ private fun AiPage(vm: SettingsViewModel) {
             Divider()
             SliderRow("Daily AI request limit", s.dailyAiLimit.toFloat(), 5f..100f, 18, "${s.dailyAiLimit}") { v -> vm.update { it.copy(dailyAiLimit = v.toInt()) } }
         }
+        if (vm.cloudAvailable && !com.arnav.music.BuildConfig.DEBUG) AppCheckGroup(vm)
         SettingsGroup("Today") {
             InfoRow("AI requests", "${usage.aiRequests} / ${s.dailyAiLimit}")
             InfoRow("Answered from cache", "${(usage.aiCacheRatio * 100).toInt()}%")
@@ -660,3 +665,45 @@ private fun open(context: android.content.Context, url: String) {
     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
 }
 
+/**
+ * Lets this phone pass App Check although the APK came from GitHub rather than Google Play: it attests
+ * with a debug token that the owner registers once in the Firebase console.
+ */
+@Composable
+private fun AppCheckGroup(vm: SettingsViewModel) {
+    val context = LocalContext.current
+    var on by remember { mutableStateOf(com.arnav.music.core.firebase.AppCheckDebugToken.isOn(context)) }
+    var reveal by remember { mutableStateOf(false) }
+    SettingsGroup(
+        "Cloud AI on this phone",
+        footer = "Google Play vouches only for apps installed from the Play Store, so App Check can't verify an APK from GitHub. " +
+            "Firebase requires App Check for AI Logic from 2 November 2026. A debug token lets this one phone through: turn it on, copy the token, " +
+            "then in the Firebase console open App Check → Apps → ⋮ next to Arnav Music → Manage debug tokens → Add, and paste it. " +
+            "Keep the token private; anyone who has it can use your AI quota. Delete it in the console if you lose this phone.",
+    ) {
+        ToggleRow("Verify with a debug token", on, { v ->
+            on = v
+            com.arnav.music.core.firebase.AppCheckDebugToken.setOn(context, v)
+            vm.clearAiBackoff()
+        }, if (on) "This phone attests with its own token" else "Uses Play Integrity (works only for Play Store installs)")
+        if (on) {
+            val token = remember { com.arnav.music.core.firebase.AppCheckDebugToken.token(context) }
+            if (token != null) {
+                Divider()
+                ActionRowS(
+                    if (reveal) token else "Show debug token",
+                    if (reveal) "Tap to copy" else "Shown only here; never sent anywhere except to Firebase App Check",
+                ) {
+                    if (!reveal) reveal = true else {
+                        val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+                        val clip = android.content.ClipData.newPlainText("App Check debug token", token)
+                        // Android 13+: keep the token out of the clipboard preview.
+                        clip.description.extras = android.os.PersistableBundle().apply { putBoolean("android.content.extra.IS_SENSITIVE", true) }
+                        clipboard?.setPrimaryClip(clip)
+                        android.widget.Toast.makeText(context, "Token copied", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
+}

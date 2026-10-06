@@ -1,13 +1,13 @@
 package com.arnav.music.core.firebase
 
-import com.google.firebase.appcheck.FirebaseAppCheck
-import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
+import android.content.Context
 
 /**
- * Release builds attest with Play Integrity. Note: Play only vouches for installs from Google Play;
- * sideloaded APKs usually fail attestation, so enforced services reject them (the app falls back).
+ * Release builds attest with Play Integrity. Play only vouches for installs from Google Play, so a
+ * sideloaded APK fails attestation once App Check is enforced; [AppCheckDebugToken] lets the owner's
+ * own phone attest with a registered debug token instead.
  */
 internal object AppCheckInstaller {
     const val PROVIDER = "Play Integrity"
-    fun install() = FirebaseAppCheck.getInstance().installAppCheckProviderFactory(PlayIntegrityAppCheckProviderFactory.getInstance())
+    fun install(context: Context) = AppCheckDebugToken.installFor(context)
 }

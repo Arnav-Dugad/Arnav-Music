@@ -177,7 +177,8 @@ dependencies {
     implementation(libs.firebase.analytics)
     implementation(libs.firebase.ai)
     implementation(libs.firebase.appcheck.playintegrity)
-    debugImplementation(libs.firebase.appcheck.debug)
+    // Release builds too: lets the owner's sideloaded phone attest with a registered debug token.
+    implementation(libs.firebase.appcheck.debug)
 
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.play.services)

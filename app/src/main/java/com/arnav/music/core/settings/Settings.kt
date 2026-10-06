@@ -98,6 +98,14 @@ data class AppSettings(
     val autoAiLyrics: Boolean = true,
     /** Crop the empty side bars of YouTube cover-art ("Topic") videos so only the square art shows. */
     val cropArtTracks: Boolean = true,
+    /** Now Playing background: a slowly drifting gradient made from the cover's colours (on-device covers). */
+    val movingGradient: Boolean = true,
+    /** Double-tap the left/right of the cover to go back/forward 5 seconds. */
+    val doubleTapSeek: Boolean = true,
+    /** On-device covers dissolve into particles and rebuild as the song changes. */
+    val coverParticles: Boolean = true,
+    /** A haptic pulse on each beat drop of songs on this phone. */
+    val beatDropHaptics: Boolean = false,
 )
 
 class SettingsRepository(private val context: Context, scope: CoroutineScope) {
@@ -153,6 +161,10 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
         val endlessRadio = booleanPreferencesKey("endless_radio")
         val autoAiLyrics = booleanPreferencesKey("auto_ai_lyrics")
         val cropArtTracks = booleanPreferencesKey("crop_art_tracks")
+        val movingGradient = booleanPreferencesKey("moving_gradient")
+        val doubleTapSeek = booleanPreferencesKey("double_tap_seek")
+        val coverParticles = booleanPreferencesKey("cover_particles")
+        val beatDropHaptics = booleanPreferencesKey("beat_drop_haptics")
     }
 
     private inline fun <reified E : Enum<E>> Preferences.enum(key: Preferences.Key<String>, default: E): E =
@@ -216,6 +228,10 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
                 endlessRadio = p[K.endlessRadio] ?: d.endlessRadio,
                 autoAiLyrics = p[K.autoAiLyrics] ?: d.autoAiLyrics,
                 cropArtTracks = p[K.cropArtTracks] ?: d.cropArtTracks,
+                movingGradient = p[K.movingGradient] ?: d.movingGradient,
+                doubleTapSeek = p[K.doubleTapSeek] ?: d.doubleTapSeek,
+                coverParticles = p[K.coverParticles] ?: d.coverParticles,
+                beatDropHaptics = p[K.beatDropHaptics] ?: d.beatDropHaptics,
             )
         }
         .onEach { _loaded.value = true }
@@ -273,6 +289,10 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
             p[K.endlessRadio] = s.endlessRadio
             p[K.autoAiLyrics] = s.autoAiLyrics
             p[K.cropArtTracks] = s.cropArtTracks
+            p[K.movingGradient] = s.movingGradient
+            p[K.doubleTapSeek] = s.doubleTapSeek
+            p[K.coverParticles] = s.coverParticles
+            p[K.beatDropHaptics] = s.beatDropHaptics
         }
     }
 
