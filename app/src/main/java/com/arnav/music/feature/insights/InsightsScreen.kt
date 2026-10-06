@@ -27,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.TrendingDown
 import androidx.compose.material.icons.automirrored.rounded.TrendingUp
+import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.material.icons.rounded.Timeline
@@ -49,7 +50,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.arnav.music.core.db.ArnavDatabase
+import com.arnav.music.domain.intelligence.Milestone
+import com.arnav.music.domain.intelligence.Milestones
 import com.arnav.music.domain.intelligence.RecapPeriod
+import com.arnav.music.domain.intelligence.StreakInfo
 import com.arnav.music.domain.intelligence.TasteDna
 import com.arnav.music.ui.LocalAppViewModel
 import com.arnav.music.ui.LocalChromePadding
@@ -64,7 +69,14 @@ import com.arnav.music.ui.theme.GlassMaterial
 import com.arnav.music.ui.theme.Radius
 import com.arnav.music.ui.theme.Space
 import com.arnav.music.ui.theme.glass
+import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -80,8 +92,13 @@ fun InsightsScreen(vm: InsightsViewModel = koinViewModel()) {
     val names by vm.artistNames.collectAsStateWithLifecycle()
     val topTracks by vm.topTracks.collectAsStateWithLifecycle()
     val machine by vm.timeMachine.collectAsStateWithLifecycle()
+    val streak by vm.streak.collectAsStateWithLifecycle()
+    val milestones by vm.milestones.collectAsStateWithLifecycle()
+    val db = koinInject<ArnavDatabase>()
+    val analyzedFlow = remember(db) { db.audioFeatures().analyzedCount() }
+    val analyzedCount by analyzedFlow.collectAsStateWithLifecycle(0)
     val chrome = LocalChromePadding.current
-    LaunchedEffect(Unit) { vm.loadDna() }
+    LaunchedEffect(Unit) { vm.loadDna(); vm.loadMilestones() }
     fun name(k: String) = names[k] ?: k
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = chrome.calculateBottomPadding() + Space.xl)) {
@@ -148,6 +165,11 @@ fun InsightsScreen(vm: InsightsViewModel = koinViewModel()) {
                     Text("${r.sessions} listening sessions", style = ArnavTheme.type.caption, color = c.contentSubtle)
                 }
             }
+        }
+        // ---- Streaks & milestones ----
+        val st = streak
+        if (st != null && (st.longest > 0 || milestones.any { it.progress > 0f })) item {
+            Section("Streaks & milestones") { StreaksAndMilestones(st, milestones) }
         }
         // ---- Listening clock ----
         item {
@@ -226,6 +248,13 @@ fun InsightsScreen(vm: InsightsViewModel = koinViewModel()) {
             Text(
                 "Confidence: ${d.confidence.name.lowercase()} · ${d.totalMinutes} minutes analysed",
                 style = ArnavTheme.type.caption, color = c.contentSubtle, modifier = Modifier.padding(Space.gutter),
+            )
+        }
+        if (analyzedCount > 0) item {
+            Text(
+                "Audio analysis: $analyzedCount local ${if (analyzedCount == 1) "song" else "songs"} measured for tempo and loudness, on this device.",
+                style = ArnavTheme.type.caption, color = c.contentSubtle,
+                modifier = Modifier.padding(start = Space.gutter, end = Space.gutter, bottom = Space.gutter),
             )
         }
     }
@@ -349,3 +378,88 @@ private fun LinkCard(title: String, icon: androidx.compose.ui.graphics.vector.Im
     }
 }
 
+@Composable
+private fun StreaksAndMilestones(streak: StreakInfo, milestones: List<Milestone>) {
+    val c = ArnavTheme.colors
+    val zone = remember { ZoneId.systemDefault() }
+    val dateFormat = remember { DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM) }
+    val achieved = remember(milestones) { milestones.filter { it.achieved }.sortedByDescending { it.achievedAt ?: 0L } }
+    val next = remember(milestones) { Milestones.upcoming(milestones, 2) }
+    Column(Modifier.fillMaxWidth().glass(GlassMaterial.Thin, RoundedCornerShape(Radius.l)).padding(Space.l)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Stat(days(streak.current), "current streak", Modifier.weight(1f))
+            Stat(days(streak.longest), "longest streak", Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(Space.m))
+        WeekStrip(streak.last7)
+        streakNote(streak)?.let { note ->
+            Text(note, style = ArnavTheme.type.caption, color = c.contentMuted, modifier = Modifier.padding(top = Space.s))
+        }
+        if (achieved.isNotEmpty()) {
+            Spacer(Modifier.height(Space.l))
+            Text("Reached", style = ArnavTheme.type.label, color = c.contentMuted)
+            Spacer(Modifier.height(Space.xs))
+            achieved.forEach { m ->
+                val date = m.achievedAt?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate().format(dateFormat) } ?: ""
+                Row(Modifier.fillMaxWidth().padding(vertical = Space.xs), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.EmojiEvents, null, tint = c.accent, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(Space.m))
+                    Column(Modifier.weight(1f)) {
+                        Text(m.title, style = ArnavTheme.type.titleSmall, color = c.content, maxLines = 1)
+                        Text(m.detail, style = ArnavTheme.type.caption, color = c.contentMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Spacer(Modifier.width(Space.s))
+                    Text(date, style = ArnavTheme.type.caption, color = c.contentSubtle)
+                }
+            }
+        }
+        if (next.isNotEmpty()) {
+            Spacer(Modifier.height(Space.l))
+            Text("Coming up", style = ArnavTheme.type.label, color = c.contentMuted)
+            next.forEach { m ->
+                Column(Modifier.padding(vertical = 5.dp).semantics { contentDescription = "${m.title}, ${(m.progress * 100).toInt()} percent" }) {
+                    Row {
+                        Text(m.title, style = ArnavTheme.type.bodySmall, color = c.content, modifier = Modifier.weight(1f), maxLines = 1)
+                        Text("${(m.progress * 100).toInt()}%", style = ArnavTheme.type.numeric, color = c.contentSubtle)
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Box(Modifier.fillMaxWidth().height(4.dp).clip(CircleShape).background(c.content.copy(alpha = 0.07f))) {
+                        Box(Modifier.fillMaxWidth(m.progress.coerceIn(0.02f, 1f)).fillMaxHeight().clip(CircleShape).background(c.accent.copy(alpha = 0.55f)))
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun days(n: Int) = if (n == 1) "1 day" else "$n days"
+
+/** A quiet acknowledgement — never a warning about losing a streak. */
+private fun streakNote(s: StreakInfo): String? = when {
+    s.current >= 2 && s.current >= s.longest -> "Your longest run so far. Nice rhythm."
+    s.current >= 7 -> "A week or more of music, day after day."
+    else -> null
+}
+
+/** The last seven days, oldest first; filled dots are days with music. */
+@Composable
+private fun WeekStrip(active: List<Boolean>) {
+    val c = ArnavTheme.colors
+    val today = remember { LocalDate.now() }
+    val labels = remember(today) {
+        (6 downTo 0).map { today.minusDays(it.toLong()).dayOfWeek.getDisplayName(java.time.format.TextStyle.NARROW, Locale.getDefault()) }
+    }
+    val count = active.count { it }
+    Row(
+        Modifier.fillMaxWidth().semantics { contentDescription = "Music on $count of the last 7 days" },
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        active.forEachIndexed { i, on ->
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.size(12.dp).clip(CircleShape).background(if (on) c.accent else c.content.copy(alpha = 0.1f)))
+                Spacer(Modifier.height(4.dp))
+                Text(labels.getOrElse(i) { "" }, style = ArnavTheme.type.caption, color = if (i == active.lastIndex) c.content else c.contentSubtle)
+            }
+        }
+    }
+}

@@ -1,5 +1,6 @@
 package com.arnav.music.core.youtube
 
+import com.arnav.music.core.db.PlaylistEntity
 import com.arnav.music.core.diagnostics.UsageMeter
 import com.arnav.music.core.repo.LibraryRepository
 import com.arnav.music.domain.model.Track
@@ -84,6 +85,9 @@ class YouTubeImporter(
         }
         return ImportSummary(selected.size, tracksTotal, skipped)
     }
+
+    /** Arnav playlists previously copied from YouTube (still in the library). */
+    suspend fun importedPlaylists(): List<PlaylistEntity> = library.importedYouTubePlaylists()
 
     /**
      * Re-reads playlists imported earlier (by their YouTube ids) and replaces each Arnav copy's songs

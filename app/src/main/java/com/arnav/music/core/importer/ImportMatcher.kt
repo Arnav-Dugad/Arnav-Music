@@ -34,9 +34,13 @@ data class MatchProgress(
     val open: Int,
     /** A background run is searching right now (this process only). */
     val running: Boolean = false,
-    /** Today's share of the YouTube search allowance for imports is spent; continues tomorrow. */
-    val pausedForToday: Boolean = false,
-)
+    /** Today's share of the YouTube search allowance for imports ([ImportMatcher.DAILY_SEARCH_CAP]) is spent. */
+    val dailyCapReached: Boolean = false,
+    /** The YouTube quota is past NORMAL (conserving or exhausted); matching waits for the daily reset. */
+    val quotaLow: Boolean = false,
+) {
+    val pausedForToday: Boolean get() = dailyCapReached || quotaLow
+}
 
 data class PlaylistImportResult(val playlistId: String, val name: String, val total: Int, val matched: Int, val pending: Int)
 
@@ -80,7 +84,8 @@ class ImportMatcher(
     val isRunning: StateFlow<Boolean> = running.asStateFlow()
 
     val progress: Flow<MatchProgress> = combine(dao.openCount(), running, _runs) { open, isRunning, _ ->
-        MatchProgress(open, isRunning, pausedForToday = open > 0 && !isRunning && limitedToday())
+        if (open == 0) MatchProgress(0, isRunning)
+        else MatchProgress(open, isRunning, dailyCapReached = dailyRemaining() <= 0, quotaLow = youtube.quotaState() != QuotaState.NORMAL)
     }
 
     fun pendingFor(playlistId: String): Flow<List<PendingMatchEntity>> = dao.forPlaylist(playlistId)
@@ -257,8 +262,6 @@ class ImportMatcher(
         val used = if (prefs.getString(KEY_DAY, null) == today) prefs.getInt(KEY_SEARCHES, 0) else 0
         prefs.edit().putString(KEY_DAY, today).putInt(KEY_SEARCHES, used + 1).apply()
     }
-
-    private fun limitedToday(): Boolean = dailyRemaining() <= 0 || youtube.quotaState() != QuotaState.NORMAL
 
     companion object {
         const val PREFS = "import_prefs"

@@ -80,7 +80,7 @@ class FileImporter(private val context: Context) {
         return ParsedImport(if (sawJson) ImportSource.SPOTIFY else ImportSource.CSV, playlists.take(MAX_PLAYLISTS))
     }
 
-    private fun decode(bytes: ByteArray): String = String(bytes, Charsets.UTF_8).removePrefix("﻿")
+    private fun decode(bytes: ByteArray): String = String(bytes, Charsets.UTF_8).removePrefix("\uFEFF")
 
     /** Reads at most [limit] bytes; throws when the stream holds more. */
     private fun readLimited(input: InputStream, limit: Long): ByteArray {

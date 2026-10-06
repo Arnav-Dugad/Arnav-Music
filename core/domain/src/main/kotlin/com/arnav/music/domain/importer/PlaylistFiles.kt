@@ -44,7 +44,7 @@ object PlaylistFiles {
      * playlist name for CSV files. Throws [ImportFormatException] when nothing usable is found.
      */
     fun parse(fileName: String, text: String): ParsedImport {
-        val body = text.removePrefix("﻿")
+        val body = text.removePrefix("\uFEFF")
         val trimmed = body.trimStart()
         if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
             val playlists = parseSpotifyJson(body)
@@ -74,7 +74,7 @@ object PlaylistFiles {
      */
     fun parseSpotifyJson(text: String): List<ImportedPlaylist> {
         val root = try {
-            lenientJson.parseToJsonElement(text.removePrefix("﻿"))
+            lenientJson.parseToJsonElement(text.removePrefix("\uFEFF"))
         } catch (e: Exception) {
             throw ImportFormatException()
         }
@@ -126,7 +126,7 @@ object PlaylistFiles {
 
     /** Header names reduced to lowercase words: "Artist Name(s)" → "artist names", "Duration (ms)" → "duration ms". */
     fun normalizeHeader(h: String): String =
-        h.removePrefix("﻿").lowercase().replace(Regex("""[()\[\]]"""), "")
+        h.removePrefix("\uFEFF").lowercase().replace(Regex("""[()\[\]]"""), "")
             .replace(Regex("""[^\p{L}\p{N}]+"""), " ").trim()
 
     internal data class Columns(val title: Int, val artist: Int, val album: Int, val duration: Int, val durationHeader: String)
@@ -200,7 +200,7 @@ object PlaylistFiles {
      * Handles a UTF-8 BOM, CRLF/LF/CR line endings, and auto-detects `,`, `;` or tab from the first line.
      */
     fun readCsv(text: String): List<List<String>> {
-        val src = text.removePrefix("﻿")
+        val src = text.removePrefix("\uFEFF")
         val delimiter = detectDelimiter(src)
         val rows = ArrayList<List<String>>()
         var row = ArrayList<String>()

@@ -67,12 +67,13 @@ class ImporterTest {
     // ------------------------------------------------------------------ CSV
 
     @Test fun `exportify csv with quoted multi-artist fields`() {
-        val csv = "﻿" + """
-            "Track URI","Track Name","Album Name","Artist Name(s)","Album Artist Name(s)","Release Date","Duration (ms)","Popularity"
-            "spotify:track:1","One Dance","Views","Drake,Wizkid,Kyla","Drake","2016-05-06","173986","80"
-            "spotify:track:2","Say ""Hello""","Album, With Comma","Someone","Someone","2020","215000","10"
-            "spotify:track:3","","Local","Nobody","","","0","0"
-        """.trimIndent()
+        val q = "\""
+        val csv = "\uFEFF" + listOf(
+            "${q}Track URI$q,${q}Track Name$q,${q}Album Name$q,${q}Artist Name(s)$q,${q}Album Artist Name(s)$q,${q}Release Date$q,${q}Duration (ms)$q,${q}Popularity$q",
+            "${q}spotify:track:1$q,${q}One Dance$q,${q}Views$q,${q}Drake,Wizkid,Kyla$q,${q}Drake$q,${q}2016-05-06$q,${q}173986$q,${q}80$q",
+            "${q}spotify:track:2$q,${q}Say $q${q}Hello$q$q$q,${q}Album, With Comma$q,${q}Someone$q,${q}Someone$q,${q}2020$q,${q}215000$q,${q}10$q",
+            "${q}spotify:track:3$q,$q$q,${q}Local$q,${q}Nobody$q,$q$q,$q$q,${q}0$q,${q}0$q",
+        ).joinToString("\r\n")
         val parsed = PlaylistFiles.parse("Summer_Hits.csv", csv)
         assertEquals(ImportSource.CSV, parsed.source)
         val p = parsed.playlists.single()
