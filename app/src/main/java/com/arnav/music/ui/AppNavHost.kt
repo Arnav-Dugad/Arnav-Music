@@ -32,6 +32,7 @@ import com.arnav.music.feature.imports.ImportHistoryScreen
 import com.arnav.music.feature.insights.ConstellationScreen
 import com.arnav.music.feature.insights.InsightsScreen
 import com.arnav.music.feature.insights.TimelineScreen
+import com.arnav.music.feature.insights.ListeningStatsScreen
 import com.arnav.music.feature.library.LibraryScreen
 import com.arnav.music.feature.moments.MomentScreen
 import com.arnav.music.feature.profile.ProfileScreen
@@ -110,6 +111,7 @@ fun AppNavHost(nav: NavHostController) {
         screen(Routes.INSIGHTS) { InsightsScreen() }
         screen(Routes.CONSTELLATION) { ConstellationScreen() }
         screen(Routes.TIMELINE) { TimelineScreen() }
+        screen(Routes.LISTENING_STATS) { ListeningStatsScreen() }
         screen(Routes.PROFILE) { ProfileScreen() }
         screen(Routes.AUTH) { AuthScreen() }
         screen(Routes.DUPLICATES) { DuplicatesScreen() }

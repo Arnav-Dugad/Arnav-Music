@@ -20,7 +20,9 @@ import kotlin.math.roundToLong
  * Without one (YouTube), the vocals are assumed to begin after a short intro and end before a short
  * outro, both a fixed share of the song that shrinks a little for songs with many lines.
  *
- * Repeated stanzas (a chorus sung twice) get the same relative line timing. Pure and deterministic.
+ * Repeated stanzas (a chorus sung twice) get the same relative line timing. Every line also gets
+ * estimated word timing ([LyricWordTiming], by syllables) so it fills word by word, and
+ * parenthetical backing vocals are split off ([BackgroundVocals]). Pure and deterministic.
  */
 object LyricAligner {
     const val DEFAULT_STEP_MS = 500L
@@ -60,7 +62,8 @@ object LyricAligner {
      * [durationMs]. [activity] is a 0..1 vocal-activity value per [stepMs] (null when unknown).
      * [introMs] is where the music starts and [outroMs] where the closing fade begins (0 = unknown),
      * as measured by on-device analysis. Instrumental gaps are returned as lines with empty text.
-     * Returns an empty list when there's nothing to time.
+     * Sung lines carry estimated words ([LyricLine.estimated]). Returns an empty list when there's
+     * nothing to time.
      */
     fun align(
         lines: List<String>,
@@ -83,7 +86,7 @@ object LyricAligner {
         val starts = layout.starts
         if (segments != null) snap(starts, onsets(activity!!, stepMs, segments, durationMs), layout.vocalEndMs)
         keepRepeatsConsistent(stanzas, starts)
-        return build(items, starts, layout.silences, layout.vocalEndMs, durationMs)
+        return LyricWordTiming.estimate(build(items, starts, layout.silences, layout.vocalEndMs, durationMs))
     }
 
     // region weights
@@ -498,12 +501,10 @@ object LyricAligner {
             val gap = silences.firstOrNull { g ->
                 g.first > start + MIN_LINE_MS && g.first < next && min(g.last + 1, next) - g.first >= INSTRUMENTAL_MIN_MS
             }
-            if (gap != null && i + 1 < starts.size) {
-                out += LyricLine(start, gap.first, items[i].text)
-                out += LyricLine(gap.first, next, "")
-            } else {
-                out += LyricLine(start, next, items[i].text)
-            }
+            val split = BackgroundVocals.split(items[i].text)
+            val breakAt = gap?.first?.takeIf { i + 1 < starts.size }
+            out += LyricLine(start, breakAt ?: next, split.text, background = split.background)
+            if (breakAt != null) out += LyricLine(breakAt, next, "")
         }
         return out
     }

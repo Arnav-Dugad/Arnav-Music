@@ -15,6 +15,7 @@ object Routes {
     const val INSIGHTS = "insights"
     const val CONSTELLATION = "constellation"
     const val TIMELINE = "timeline"
+    const val LISTENING_STATS = "listening_stats"
     const val PROFILE = "profile"
     const val SETTINGS = "settings"
     const val SETTINGS_PAGE = "settings/{page}"

@@ -25,5 +25,5 @@ fun nowSinging(track: Track, progress: Progress, enabled: Boolean): String? {
     val ready = state as? LyricsState.Ready ?: return null
     val synced = ready.lyrics as? Lyrics.Synced ?: return null
     val i = LyricsTiming.activeIndex(synced.lines, progress.positionMs)
-    return synced.lines.getOrNull(i)?.text?.takeIf { it.isNotBlank() }
+    return synced.lines.getOrNull(i)?.takeUnless { it.isInstrumental }?.fullText
 }

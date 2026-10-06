@@ -164,6 +164,7 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
     val liked by vm.liked.collectAsStateWithLifecycle()
     val playlists by vm.playlists.collectAsStateWithLifecycle()
     val switching by vm.player.switchingVariant.collectAsStateWithLifecycle()
+    com.arnav.music.core.analysis.BeatDropHaptics(state, progress, settings)
     val expand = remember { Animatable(0f) }
     var sheet by remember { mutableStateOf<SheetRequest?>(null) }
     var launchOrigin by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }

@@ -157,6 +157,9 @@ interface AudioFeaturesDao {
     @Query("SELECT trackId, bpm, loudnessDb, energy FROM audio_features WHERE ok = 1") fun summaries(): Flow<List<FeatureSummary>>
     @Query("SELECT trackId FROM audio_features WHERE version = :version") suspend fun analyzedIds(version: Int): List<String>
     @Query("SELECT COUNT(*) FROM audio_features WHERE ok = 1") fun analyzedCount(): Flow<Int>
+    /** Moves the outro mark ("Trim it here"); returns 0 when the song has no successful analysis. */
+    @Query("UPDATE audio_features SET outroMs = :outroMs WHERE trackId = :trackId AND ok = 1")
+    suspend fun setOutro(trackId: String, outroMs: Long): Int
     @Upsert suspend fun upsert(features: AudioFeaturesEntity)
     @Query("DELETE FROM audio_features") suspend fun clear()
 }
@@ -200,4 +203,13 @@ interface RecFeedbackDao {
     @Query("SELECT * FROM rec_feedback") fun observeAll(): Flow<List<RecFeedbackEntity>>
     @Query("SELECT * FROM rec_feedback") suspend fun all(): List<RecFeedbackEntity>
     @Query("DELETE FROM rec_feedback WHERE subject = :subject") suspend fun delete(subject: String)
+}
+
+@Dao
+interface SkipMarkDao {
+    @Insert suspend fun insert(mark: SkipMarkEntity)
+    @Query("SELECT * FROM skip_marks WHERE dismissed = 0 ORDER BY skippedAt ASC") suspend fun active(): List<SkipMarkEntity>
+    @Query("SELECT * FROM skip_marks ORDER BY playStartedAt ASC") suspend fun all(): List<SkipMarkEntity>
+    @Query("UPDATE skip_marks SET dismissed = 1 WHERE trackId = :trackId") suspend fun dismiss(trackId: String)
+    @Query("DELETE FROM skip_marks") suspend fun clear()
 }

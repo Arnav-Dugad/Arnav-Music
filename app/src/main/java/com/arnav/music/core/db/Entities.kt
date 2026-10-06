@@ -224,3 +224,20 @@ data class RecFeedbackEntity(
     val kind: String,
     val createdAt: Long,
 )
+
+/**
+ * Where a song was skipped by hand (next / skip / picking another song) before its end, for
+ * "Songs you skip at the same second". [playStartedAt] matches the listen's `play_events.startedAt`.
+ * Local only, never synced.
+ */
+@Entity(tableName = "skip_marks", indices = [Index("trackId"), Index("playStartedAt")])
+data class SkipMarkEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val trackId: String,
+    val playStartedAt: Long,
+    val positionMs: Long,
+    val durationMs: Long?,
+    val skippedAt: Long,
+    /** Hidden from the skip-spot list (dismissed or trimmed); still exported. */
+    @ColumnInfo(defaultValue = "0") val dismissed: Boolean = false,
+)

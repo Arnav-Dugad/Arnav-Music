@@ -209,10 +209,10 @@ class LyricsWidget : GlanceAppWidget() {
         }
 
         private fun synced(track: Track, lines: List<LyricLine>, index: Int): WidgetLyric {
-            val current = lines.getOrNull(index)?.takeUnless { it.isInstrumental }?.text
+            val current = lines.getOrNull(index)?.takeUnless { it.isInstrumental }?.fullText
             var n = index + 1
             while (n < lines.size && lines[n].isInstrumental) n++
-            return WidgetLyric(WidgetLyric.State.SYNCED, track.title, track.artist, current, lines.getOrNull(n)?.text)
+            return WidgetLyric(WidgetLyric.State.SYNCED, track.title, track.artist, current, lines.getOrNull(n)?.fullText)
         }
 
         private const val RECHECK_MS = 60_000L

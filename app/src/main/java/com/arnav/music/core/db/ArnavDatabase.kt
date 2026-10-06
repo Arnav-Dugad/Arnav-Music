@@ -10,9 +10,9 @@ import androidx.room.RoomDatabase
         TrackEntity::class, LikeEntity::class, PlaylistEntity::class, PlaylistTrackEntity::class,
         PlayEventEntity::class, SearchCacheEntity::class, RecentSearchEntity::class, AiCacheEntity::class,
         KvSyncEntity::class, LyricsEntity::class, AudioFeaturesEntity::class, PendingMatchEntity::class, ImportHistoryEntity::class,
-        TagOverrideEntity::class, RecFeedbackEntity::class,
+        TagOverrideEntity::class, RecFeedbackEntity::class, SkipMarkEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class ArnavDatabase : RoomDatabase() {
@@ -29,6 +29,7 @@ abstract class ArnavDatabase : RoomDatabase() {
     abstract fun importHistory(): ImportHistoryDao
     abstract fun tagOverrides(): TagOverrideDao
     abstract fun recFeedback(): RecFeedbackDao
+    abstract fun skipMarks(): SkipMarkDao
 
     companion object {
         const val NAME = "arnav-music.db"
@@ -67,9 +68,17 @@ abstract class ArnavDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_rec_feedback_kind` ON `rec_feedback` (`kind`)")
             }
         }
+        /** v6: where songs were skipped by hand ("Songs you skip at the same second"). */
+        val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `skip_marks` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `trackId` TEXT NOT NULL, `playStartedAt` INTEGER NOT NULL, `positionMs` INTEGER NOT NULL, `durationMs` INTEGER, `skippedAt` INTEGER NOT NULL, `dismissed` INTEGER NOT NULL DEFAULT 0)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_skip_marks_trackId` ON `skip_marks` (`trackId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_skip_marks_playStartedAt` ON `skip_marks` (`playStartedAt`)")
+            }
+        }
         fun build(context: Context): ArnavDatabase =
             Room.databaseBuilder(context, ArnavDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .fallbackToDestructiveMigrationOnDowngrade(true)
                 .build()
     }

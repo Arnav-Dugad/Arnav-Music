@@ -234,7 +234,7 @@ class LibraryRepository(
     suspend fun eventsBetween(from: Long, to: Long): List<PlayEvent> = db.events().between(from, to).map { it.toDomain() }
     fun observeEvents(sinceMs: Long): Flow<List<PlayEvent>> = db.events().observeSince(sinceMs).map { l -> l.map { it.toDomain() } }
     suspend fun firstEventAt(): Long? = db.events().firstEventAt()
-    suspend fun clearHistory() = db.events().clear()
+    suspend fun clearHistory() { db.events().clear(); db.skipMarks().clear() }
     suspend fun tracksByArtist(artistKey: String): List<Track> = db.tracks().byArtist(artistKey).map { it.toDomain() }
     suspend fun searchKnown(q: String): List<Track> = db.tracks().searchLocal(q).map { it.toDomain() }
 

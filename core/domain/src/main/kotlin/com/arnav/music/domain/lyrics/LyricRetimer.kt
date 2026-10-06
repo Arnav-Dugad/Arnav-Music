@@ -68,39 +68,50 @@ object LyricRetimer {
 
     private fun remap(l: LyricLine, start: Long, map: (Long) -> Long): LyricLine {
         val endMapped = map(l.endMs).coerceAtLeast(start)
-        val words = if (l.words.isEmpty()) l.words else l.words.map { w ->
+        fun moved(words: List<LyricWord>) = if (words.isEmpty()) words else words.map { w ->
             val ws = map(w.startMs).coerceAtLeast(start)
             LyricWord(ws, map(w.endMs).coerceAtLeast(ws), w.text)
         }
-        return LyricLine(start, endMapped, l.text, words)
+        return l.copy(startMs = start, endMs = endMapped, words = moved(l.words), backgroundWords = moved(l.backgroundWords))
     }
 }
 
-/** Writes timed lines back as LRC, `[mm:ss.xx]` per line (`<mm:ss.xx>` per word when word-synced). */
+/**
+ * Writes timed lines back as LRC, `[mm:ss.xx]` per line (`<mm:ss.xx>` per word when word-synced).
+ * Estimated word timing ([LyricLine.estimated]) is not written. Backing vocals with their own word
+ * timing follow their line as a `[bg: …]` line; untimed ones go back in parentheses.
+ */
 object LrcWriter {
     fun write(lines: List<LyricLine>): String = buildString {
         for (l in lines) {
             append('[').append(stamp(l.startMs)).append(']')
             if (!l.isInstrumental) {
-                append(wordTagged(l) ?: l.text)
+                val real = !l.estimated
+                append((if (real) wordTagged(l.text, l.words) else null) ?: l.text)
+                val bg = l.background?.takeIf { it.isNotBlank() }
+                if (bg != null) {
+                    val tagged = wordTagged(bg, l.backgroundWords)
+                    if (tagged != null) append("\n[bg:").append(tagged).append(']')
+                    else append(if (l.text.isBlank()) "(" else " (").append(bg).append(')')
+                }
             }
             append('\n')
         }
     }.trimEnd()
 
-    /** The line text with a `<mm:ss.xx>` tag before each timed word (spacing kept); null when a word isn't found. */
-    private fun wordTagged(l: LyricLine): String? {
-        if (l.words.isEmpty()) return null
+    /** [text] with a `<mm:ss.xx>` tag before each timed word (spacing kept); null when a word isn't found. */
+    private fun wordTagged(text: String, words: List<LyricWord>): String? {
+        if (words.isEmpty()) return null
         val sb = StringBuilder()
         var cursor = 0
-        for (w in l.words) {
-            val at = l.text.indexOf(w.text, cursor)
+        for (w in words) {
+            val at = text.indexOf(w.text, cursor)
             if (w.text.isEmpty() || at < 0) return null
-            sb.append(l.text, cursor, at)
+            sb.append(text, cursor, at)
             sb.append('<').append(stamp(w.startMs)).append('>').append(w.text)
             cursor = at + w.text.length
         }
-        sb.append(l.text, cursor, l.text.length)
+        sb.append(text, cursor, text.length)
         return sb.toString()
     }
 

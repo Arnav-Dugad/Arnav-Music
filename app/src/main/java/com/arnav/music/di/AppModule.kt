@@ -126,6 +126,7 @@ val appModule = module {
     viewModel { com.arnav.music.feature.library.YouTubeImportViewModel(get()) }
     viewModel { ArnavAiViewModel(get(), get(), get(), get()) }
     viewModel { InsightsViewModel(get(), get()) }
+    viewModel { com.arnav.music.feature.insights.ListeningStatsViewModel(androidContext(), get(), get(), get()) }
     viewModel { SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     viewModel { CollectionViewModel(get(), get(), get(), get(), get(), get()) }
     viewModel { com.arnav.music.feature.library.PlaylistImportViewModel(androidContext(), get(), get(), get(), get(), get()) }

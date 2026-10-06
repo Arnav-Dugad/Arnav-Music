@@ -280,7 +280,7 @@ private fun PlaybackPage(vm: SettingsViewModel) {
             ToggleRow("Moving cover colours", s.movingGradient, { v -> vm.update { it.copy(movingGradient = v) } }, "Now Playing's background slowly drifts through the cover's colours (songs on this phone)")
             ToggleRow("Double-tap to skip 5 seconds", s.doubleTapSeek, { v -> vm.update { it.copy(doubleTapSeek = v) } }, "Double-tap the left or right of the cover to go back or forward")
             ToggleRow("Particle cover changes", s.coverParticles, { v -> vm.update { it.copy(coverParticles = v) } }, "Covers dissolve into particles and rebuild when the song changes (off with reduced motion)")
-            ToggleRow("Haptics on the beat drop", s.beatDropHaptics, { v -> vm.update { it.copy(beatDropHaptics = v) } }, "A pulse you can feel when the beat drops, for analysed songs on this phone")
+            ToggleRow("Haptics on the beat drop", s.beatDropHaptics, { v -> vm.update { it.copy(beatDropHaptics = v) } }, if (s.haptics) "A pulse you can feel when the beat drops, for analysed songs on this phone" else "Turn on Haptics first", enabled = s.haptics)
             ToggleRow("Crop cover-art videos", s.cropArtTracks, { v -> vm.update { it.copy(cropArtTracks = v) } }, "Song uploads that are just album art show as a clean square, without the black side bars")
             Divider()
             ToggleRow("Prefer music videos", s.preferVideos, { v -> vm.update { it.copy(preferVideos = v) } }, "Off: songs first, like YouTube Music")

@@ -23,6 +23,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardReturn
+import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.BlurOff
@@ -100,6 +101,7 @@ fun CommandPalette(onDismiss: () -> Unit) {
             add(Command("On-device music", "Local library, plays in background", Icons.Rounded.PhoneAndroid, "local downloads files") { nav.go(Routes.collection(CollectionKind.LOCAL)) })
             add(Command("Taste DNA", "Listening stats & recaps", Icons.Rounded.Insights, "stats dna recap") { nav.go(Routes.INSIGHTS) })
             add(Command("Listening timeline", "Take me back to a day", Icons.Rounded.Timeline, "history calendar") { nav.go(Routes.TIMELINE) })
+            add(Command("Listening stats", "Genre clock, discovery, skips, CSV", Icons.Rounded.BarChart, "stats export csv skip") { nav.go(Routes.LISTENING_STATS) })
             add(Command("Taste constellation", "Your musical universe", Icons.Rounded.Hub, "graph artists") { nav.go(Routes.CONSTELLATION) })
             add(Command("Enable Glass", "Translucent, layered UI", Icons.Rounded.BlurOn, "glass on") { animated { vm.setGlass(GlassLevel.FULL) } })
             add(Command("Disable Glass", "Pure, opaque surfaces", Icons.Rounded.BlurOff, "glass off pure") { animated { vm.setGlass(GlassLevel.OFF) } })

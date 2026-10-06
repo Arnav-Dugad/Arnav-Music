@@ -19,6 +19,8 @@ import com.arnav.music.core.common.Log
 import com.arnav.music.core.db.ArnavDatabase
 import com.arnav.music.core.db.AudioFeaturesDao
 import com.arnav.music.core.db.AudioFeaturesEntity
+import com.arnav.music.core.db.SkipMarkDao
+import com.arnav.music.core.db.SkipMarkEntity
 import com.arnav.music.core.repo.IntelligenceRepository
 import com.arnav.music.core.repo.LibraryRepository
 import com.arnav.music.core.settings.SettingsRepository
@@ -31,6 +33,7 @@ import com.arnav.music.domain.model.SourceType
 import com.arnav.music.domain.model.Track
 import com.arnav.music.domain.queue.QueueItem
 import com.arnav.music.domain.queue.QueueState
+import com.arnav.music.domain.stats.SkipSpots
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.PlayerConstants
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -138,6 +141,8 @@ class PlaybackController(
 
     // Smart transitions (local playback only) — see [smartTick] and [skipIntroOnNaturalStart].
     private val featuresDao: AudioFeaturesDao by lazy { GlobalContext.get().get<ArnavDatabase>().audioFeatures() }
+    /** Where songs get skipped by hand (Listening stats → "Songs you skip at the same second"). */
+    private val skipMarks: SkipMarkDao by lazy { GlobalContext.get().get<ArnavDatabase>().skipMarks() }
     /** Intro/outro per local track id, refreshed whenever a track becomes current. */
     private val sectionCache = HashMap<String, TrackSections>()
     /** Queue uid the outro watcher last saw, and its position/seek count on the previous tick. */
@@ -817,6 +822,12 @@ class PlaybackController(
         val completed = completedNaturally || (duration != null && listened >= duration * 0.8)
         val event = PlayEvent(t.id, t.artistKey, sessionStartedAt, listened, duration, completed, skipped = skipped && !completed && listened < 30_000 + (duration ?: 0) / 3)
         scope.launch { runCatching { library.recordPlay(event, t.source.name) } }
+        // A hand skip before the end (not a failed track): remember the second, whatever the play counts as.
+        val position = _progress.value.positionMs
+        if (skipped && _state.value.issue !is PlaybackIssue.Unavailable && SkipSpots.isMeaningful(position, duration)) {
+            val mark = SkipMarkEntity(trackId = t.id.value, playStartedAt = sessionStartedAt, positionMs = position, durationMs = duration, skippedAt = clock.now())
+            scope.launch { runCatching { skipMarks.insert(mark) } }
+        }
     }
 
     private fun persistQueue() {

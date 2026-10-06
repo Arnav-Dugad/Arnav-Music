@@ -27,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.TrendingDown
 import androidx.compose.material.icons.automirrored.rounded.TrendingUp
+import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.Hub
 import androidx.compose.material.icons.rounded.Insights
@@ -122,6 +123,11 @@ fun InsightsScreen(vm: InsightsViewModel = koinViewModel()) {
             Row(Modifier.padding(horizontal = Space.gutter, vertical = Space.l), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
                 LinkCard("Constellation", Icons.Rounded.Hub, Modifier.weight(1f)) { nav.go(Routes.CONSTELLATION) }
                 LinkCard("Timeline", Icons.Rounded.Timeline, Modifier.weight(1f)) { nav.go(Routes.TIMELINE) }
+            }
+        }
+        item {
+            LinkCard("Listening stats", Icons.Rounded.BarChart, Modifier.padding(horizontal = Space.gutter).padding(bottom = Space.l).fillMaxWidth()) {
+                nav.go(Routes.LISTENING_STATS)
             }
         }
         // ---- Recap ----

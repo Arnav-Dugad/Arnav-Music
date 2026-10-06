@@ -129,6 +129,7 @@ import com.arnav.music.domain.lyrics.LrcWriter
 import com.arnav.music.domain.lyrics.LyricLine
 import com.arnav.music.domain.lyrics.LyricRetimer
 import com.arnav.music.domain.lyrics.LyricWord
+import com.arnav.music.domain.lyrics.LyricWordTiming
 import com.arnav.music.domain.lyrics.Lyrics
 import com.arnav.music.domain.lyrics.LyricsTiming
 import com.arnav.music.domain.lyrics.displayLines
@@ -152,8 +153,9 @@ import kotlin.math.abs
  * are shown "Auto-timed" when possible, and any synced lyrics can be fine-tuned ("Adjust timing").
  *
  * Time-synced lyrics follow playback: the sung line sits ~30% from the top, lines below follow
- * the scroll in a short cascade, word-synced lines fill word by word, and instrumental breaks
- * show breathing dots. Dragging the list pauses following for three seconds.
+ * the scroll in a short cascade, lines fill word by word (a softer sweep where the word timing is
+ * estimated, see [LyricWordTiming]), backing vocals sit smaller under their line, and instrumental
+ * breaks show breathing dots. Dragging the list pauses following for three seconds.
  */
 @Composable
 fun LyricsPanel(
@@ -393,8 +395,11 @@ private fun LyricsHost(
                                 },
                             )
                         }
+                        // Lines without word timing get estimated words (by syllables) so they fill too.
+                        val shownLines = editing?.lines ?: lyrics.lines
+                        val timedLines = remember(shownLines) { LyricWordTiming.estimate(shownLines) }
                         SyncedLyrics(
-                            lines = editing?.lines ?: lyrics.lines,
+                            lines = timedLines,
                             progress = progress,
                             isPlaying = isPlaying,
                             onSeek = onSeek,
@@ -752,7 +757,7 @@ private fun SyncedLyrics(
                         onTap = onTap,
                         loudness = loudness,
                         beat = beat,
-                        extras = extras?.forLine(line.text),
+                        extras = extras?.forLine(line.fullText),
                         secondaryStyle = secondaryStyle,
                     )
                 }
@@ -808,8 +813,18 @@ private fun LyricRow(
     val blurDp by animateFloatAsState(blurTarget, tween(380), label = "lineBlur")
     val words = line.words
     val wordSync = isActive && words.isNotEmpty()
-    val ranges = remember(line) { wordRanges(line) }
+    val ranges = remember(line) { wordRanges(line.text, line.words) }
     val layoutRef = remember { LayoutRef() }
+    val background = line.background?.takeIf { it.isNotBlank() }
+    val bgRanges = remember(line) { wordRanges(background.orEmpty(), line.backgroundWords) }
+    val bgLayoutRef = remember { LayoutRef() }
+    val bgStyle = remember(style) {
+        style.copy(
+            fontSize = if (style.fontSize.isUnspecified) 21.sp else style.fontSize * BACKGROUND_SCALE,
+            lineHeight = if (style.lineHeight.isUnspecified) style.lineHeight else style.lineHeight * BACKGROUND_SCALE,
+            fontWeight = FontWeight.Bold,
+        )
+    }
     val interaction = remember { MutableInteractionSource() }
 
     Box(
@@ -838,29 +853,71 @@ private fun LyricRow(
                 onClick = onTap,
             )
             .semantics {
-                contentDescription = listOfNotNull(line.text, extras?.translated).joinToString(". ")
+                contentDescription = listOfNotNull(line.fullText, extras?.translated).joinToString(". ")
                 if (isActive) stateDescription = "Now singing"
                 customActions = listOf(CustomAccessibilityAction("Seek here") { onTap(); true })
             }
             .padding(horizontal = 10.dp, vertical = 12.dp),
     ) {
         Column {
-            // Word fill (the mask) is applied to the main line only.
-            Text(
-                text = line.text,
-                style = style,
-                color = on,
-                modifier = if (wordSync) {
-                    Modifier
-                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                        .drawWithContent {
-                            drawContent()
-                            val layout = layoutRef.value
-                            if (layout != null) drawWordMask(layout, ranges, words, line, clock.positionMs)
-                        }
-                } else Modifier,
-                onTextLayout = { layoutRef.value = it },
-            )
+            // Word fill (the mask) is applied to the sung text only, not romanisation/translation.
+            // Estimated word timing gets a wide, soft edge: it follows the voice only roughly.
+            if (line.text.isNotBlank()) {
+                Text(
+                    text = line.text,
+                    style = style,
+                    color = on,
+                    modifier = if (wordSync) {
+                        Modifier
+                            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                            .drawWithContent {
+                                drawContent()
+                                val layout = layoutRef.value
+                                if (layout != null) {
+                                    val feather = (if (line.estimated) ESTIMATED_FEATHER_DP else WORD_FEATHER_DP).dp.toPx()
+                                    drawWordMask(layout, ranges, words, line.text.length, LyricsTiming.lineProgress(line, clock.positionMs), clock.positionMs, feather)
+                                }
+                            }
+                    } else Modifier,
+                    onTextLayout = { layoutRef.value = it },
+                )
+            }
+            if (background != null) {
+                // Backing vocals: smaller, dimmer and set in a little under the lead (Apple Music style);
+                // a line of backing vocals only stays at the start. They fill on their own timing, or
+                // just behind the lead when they have none.
+                val bgOnly = line.text.isBlank()
+                Text(
+                    text = background,
+                    style = bgStyle,
+                    color = on.copy(alpha = on.alpha * BACKGROUND_ALPHA),
+                    modifier = Modifier
+                        .padding(start = if (bgOnly) 0.dp else BACKGROUND_INDENT, top = if (bgOnly) 0.dp else 4.dp)
+                        .then(
+                            if (isActive) {
+                                Modifier
+                                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                                    .drawWithContent {
+                                        drawContent()
+                                        val layout = bgLayoutRef.value
+                                        if (layout != null) {
+                                            val bgWords = line.backgroundWords
+                                            if (bgWords.isNotEmpty()) {
+                                                drawWordMask(
+                                                    layout, bgRanges, bgWords, background.length,
+                                                    LyricsTiming.backgroundProgress(line, clock.positionMs), clock.positionMs,
+                                                    WORD_FEATHER_DP.dp.toPx(),
+                                                )
+                                            } else {
+                                                drawSweepMask(layout, background.length, LyricsTiming.backgroundProgress(line, clock.positionMs), ESTIMATED_FEATHER_DP.dp.toPx())
+                                            }
+                                        }
+                                    }
+                            } else Modifier,
+                        ),
+                    onTextLayout = { bgLayoutRef.value = it },
+                )
+            }
             SecondaryLines(extras, secondaryStyle, on)
         }
     }
@@ -869,6 +926,12 @@ private fun LyricRow(
 private const val BEAT_LIFT_DP = 2f
 private const val BEAT_SCALE = 0.012f
 private const val SECONDARY_ALPHA = 0.62f
+private const val BACKGROUND_SCALE = 0.7f
+private const val BACKGROUND_ALPHA = 0.72f
+private val BACKGROUND_INDENT = 22.dp
+/** Edge of the word fill: crisp for real word timing, wide and soft for estimated timing. */
+private const val WORD_FEATHER_DP = 14f
+private const val ESTIMATED_FEATHER_DP = 44f
 
 /** Romanisation, then translation, smaller and muted under a lyric line. */
 @Composable
@@ -885,13 +948,13 @@ private fun SecondaryLines(extras: LineExtras?, style: TextStyle, on: Color) {
     }
 }
 
-/** Character ranges [start, end) of each timed word inside the line text; -1 when not found. */
-private fun wordRanges(line: LyricLine): IntArray {
-    val out = IntArray(line.words.size * 2) { -1 }
+/** Character ranges [start, end) of each timed word inside [text]; -1 when not found. */
+private fun wordRanges(text: String, words: List<LyricWord>): IntArray {
+    val out = IntArray(words.size * 2) { -1 }
     var cursor = 0
-    line.words.forEachIndexed { i, w ->
+    words.forEachIndexed { i, w ->
         if (w.text.isEmpty()) return@forEachIndexed
-        val at = line.text.indexOf(w.text, cursor)
+        val at = text.indexOf(w.text, cursor)
         if (at >= 0) {
             out[2 * i] = at
             out[2 * i + 1] = at + w.text.length
@@ -902,17 +965,19 @@ private fun wordRanges(line: LyricLine): IntArray {
 }
 
 /**
- * Masks the (already drawn, full-brightness) line so sung text stays bright and unsung text is dim,
- * with a soft edge moving through the current word. Wrap-aware: each visual text line is handled.
+ * Masks the (already drawn, full-brightness) text so sung text stays bright and unsung text is dim,
+ * with a soft edge ([featherPx] wide) moving through the current word. [fallbackProgress] (0..1
+ * through the whole text) is used for a word that can't be found in the text.
  */
 private fun DrawScope.drawWordMask(
     layout: TextLayoutResult,
     ranges: IntArray,
     words: List<LyricWord>,
-    line: LyricLine,
+    textLength: Int,
+    fallbackProgress: Float,
     positionMs: Long,
+    featherPx: Float,
 ) {
-    val textLength = line.text.length
     if (textLength == 0 || layout.lineCount == 0) return
     var current = -1
     for (i in words.indices) {
@@ -929,7 +994,7 @@ private fun DrawScope.drawWordMask(
         val p = LyricsTiming.wordProgress(words[current], positionMs)
         if (s < 0 || e < 0) {
             // Word not found in the text: fall back to an even sweep over the whole line.
-            val c = (textLength * LyricsTiming.lineProgress(line, positionMs)).toInt().coerceIn(0, textLength)
+            val c = (textLength * fallbackProgress).toInt().coerceIn(0, textLength)
             s = c
             e = c
         }
@@ -940,7 +1005,27 @@ private fun DrawScope.drawWordMask(
         fillLine = l
         fillX = x0 + (x1 - x0) * p
     }
-    val feather = 14.dp.toPx()
+    drawFillMask(layout, fillLine, fillX, featherPx)
+}
+
+/** An even sweep through the whole text, [progress] 0..1 (backing vocals without word timing). */
+private fun DrawScope.drawSweepMask(layout: TextLayoutResult, textLength: Int, progress: Float, featherPx: Float) {
+    if (textLength == 0 || layout.lineCount == 0) return
+    if (progress <= 0f) {
+        drawFillMask(layout, -1, 0f, featherPx)
+        return
+    }
+    if (progress >= 1f) return // all sung: nothing to dim
+    val c = (textLength * progress).toInt().coerceIn(0, textLength)
+    val l = layout.getLineForOffset(c)
+    drawFillMask(layout, l, layout.getHorizontalPosition(c, true), featherPx)
+}
+
+/**
+ * Dims everything after [fillX] on visual line [fillLine] and all lines below it (-1: dims all),
+ * with a soft edge [feather] px wide. Wrap-aware: each visual text line is handled.
+ */
+private fun DrawScope.drawFillMask(layout: TextLayoutResult, fillLine: Int, fillX: Float, feather: Float) {
     val pad = 4.dp.toPx()
     val dim = Color.Black.copy(alpha = UNSUNG_ALPHA)
     for (l in 0 until layout.lineCount) {

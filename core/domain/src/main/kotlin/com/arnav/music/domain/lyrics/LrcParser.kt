@@ -5,6 +5,9 @@ package com.arnav.music.domain.lyrics
  *
  * Supported: `[mm:ss]`, `[mm:ss.xx]`, `[mm:ss.xxx]`, `[mm:ss:xx]`, several timestamps per line,
  * `[offset:±ms]`, metadata tags (ignored), `<mm:ss.xx>` word tags, BOM and any line ending.
+ * Backing vocals: an enhanced-LRC `[bg: <mm:ss.xx>word …]` line belongs to the timed line before it,
+ * and parenthetical lead-in/tail groups ("I'm on my way (on my way)") are split off by
+ * [BackgroundVocals]. Duet voice prefixes (`v1:`, `v2:`) are dropped.
  * Text without any timestamp becomes [Lyrics.Plain].
  */
 object LrcParser {
@@ -18,6 +21,8 @@ object LrcParser {
     private val wordTag = Regex("""<(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?>""")
     private val metaTag = Regex("""^\s*\[([A-Za-z#][A-Za-z0-9_\- ]{0,15}):(.*)\]\s*$""")
     private val whitespace = Regex("""\s+""")
+    private val bgLine = Regex("""^\s*\[bg:(.*)]\s*$""", RegexOption.IGNORE_CASE)
+    private val voicePrefix = Regex("""^\s*v\d{1,2}:\s*""", RegexOption.IGNORE_CASE)
 
     /** Well-known LRC header keys; only these are dropped from plain text (so "[Chorus: x]" survives). */
     private val metaKeys = setOf(
@@ -26,7 +31,18 @@ object LrcParser {
     )
 
     private class RawWord(val startMs: Long, var explicitEndMs: Long?, val text: String)
-    private class Entry(val timeMs: Long, val text: String, val words: List<RawWord>)
+    private class Entry(val timeMs: Long, val text: String, val words: List<RawWord>) {
+        /** Backing vocals from `[bg: …]` lines (null when none). */
+        var bgText: String? = null
+        var bgWords: List<RawWord> = emptyList()
+
+        val hasContent: Boolean get() = text.isNotBlank() || !bgText.isNullOrBlank()
+
+        fun addBackground(text: String, words: List<RawWord>) {
+            bgText = bgText?.let { "$it $text" } ?: text
+            bgWords = bgWords + words
+        }
+    }
 
     /** True when [raw] contains at least one LRC line timestamp. */
     fun looksSynced(raw: String): Boolean = raw.lineSequence().any { timeTag.containsMatchIn(it) }
@@ -38,8 +54,31 @@ object LrcParser {
         var offsetMs = 0L
         val entries = ArrayList<Entry>()
         val plain = ArrayList<String>()
+        // Entries made from the latest timed line (several when it has several timestamps).
+        var lastEntries: List<Entry> = emptyList()
 
         for (line in text.split('\n')) {
+            val bg = bgLine.find(line)
+            if (bg != null) {
+                val body = bg.groupValues[1]
+                val shown = parseWords(body, 0L).first
+                if (shown.isEmpty()) continue
+                plain.add("($shown)")
+                if (lastEntries.isNotEmpty()) {
+                    val base = lastEntries[0].timeMs
+                    val words = parseWords(body, base).second
+                    for (e in lastEntries) e.addBackground(shown, shifted(words, e.timeMs - base))
+                } else {
+                    // Backing vocals before any lead line: a line of their own, when they're timed.
+                    val first = wordTag.find(body) ?: continue
+                    val start = toMs(first.groupValues[1], first.groupValues[2], first.groupValues[3])
+                    val entry = Entry(start, "", emptyList())
+                    entry.addBackground(shown, parseWords(body, start).second)
+                    entries.add(entry)
+                    lastEntries = listOf(entry)
+                }
+                continue
+            }
             // Leading timestamps (possibly several).
             val stamps = ArrayList<Long>(1)
             var rest = line
@@ -60,12 +99,13 @@ object LrcParser {
                 plain.add(line.trimEnd())
                 continue
             }
-            val (lineText, words) = parseWords(rest, stamps[0])
+            val (lineText, words) = parseWords(rest.replaceFirst(voicePrefix, ""), stamps[0])
+            val made = ArrayList<Entry>(stamps.size)
             for (s in stamps) {
-                val shift = s - stamps[0]
-                val shifted = if (shift == 0L) words else words.map { RawWord(it.startMs + shift, it.explicitEndMs?.plus(shift), it.text) }
-                entries.add(Entry(s, lineText, shifted))
+                made.add(Entry(s, lineText, shifted(words, s - stamps[0])))
             }
+            entries.addAll(made)
+            lastEntries = made
         }
 
         if (entries.isEmpty()) return plainOf(plain)
@@ -76,8 +116,8 @@ object LrcParser {
                 if (offsetMs == 0L) e else Entry(
                     (e.timeMs - offsetMs).coerceAtLeast(0),
                     e.text,
-                    e.words.map { w -> RawWord((w.startMs - offsetMs).coerceAtLeast(0), w.explicitEndMs?.let { (it - offsetMs).coerceAtLeast(0) }, w.text) },
-                )
+                    shifted(e.words, -offsetMs),
+                ).also { moved -> e.bgText?.let { moved.addBackground(it, shifted(e.bgWords, -offsetMs)) } }
             }
             .sortedBy { it.timeMs }
 
@@ -87,7 +127,7 @@ object LrcParser {
     private fun buildLines(entries: List<Entry>, durationMs: Long?): List<LyricLine> {
         val out = ArrayList<LyricLine>(entries.size + 4)
         val first = entries[0]
-        if (first.text.isNotBlank() && first.timeMs >= INSTRUMENTAL_GAP_MS) {
+        if (first.hasContent && first.timeMs >= INSTRUMENTAL_GAP_MS) {
             out.add(LyricLine(0L, first.timeMs, ""))
         }
         for (i in entries.indices) {
@@ -99,27 +139,46 @@ object LrcParser {
                 else -> cur.timeMs + LAST_LINE_MS
             }
             var gap: LyricLine? = null
-            if (next != null && cur.text.isNotBlank() && next.text.isNotBlank()) {
+            if (next != null && cur.hasContent && next.hasContent) {
                 val estimate = estimatedEnd(cur).coerceAtMost(next.timeMs)
                 if (next.timeMs - estimate >= INSTRUMENTAL_GAP_MS) {
                     end = estimate
                     gap = LyricLine(estimate, next.timeMs, "")
                 }
             }
-            out.add(LyricLine(cur.timeMs, end, cur.text, finishWords(cur.words, end)))
+            out.add(lineOf(cur, end))
             if (gap != null) out.add(gap)
         }
         return out
     }
 
+    /** The final line: parenthetical backing vocals split off, `[bg: …]` vocals appended. */
+    private fun lineOf(e: Entry, end: Long): LyricLine {
+        val split = BackgroundVocals.split(e.text, finishWords(e.words, end))
+        val extra = e.bgText?.takeIf { it.isNotBlank() }
+        val background = listOfNotNull(split.background, extra).joinToString(" ").ifEmpty { null }
+        val bgWords = if (extra == null) split.backgroundWords else split.backgroundWords + finishWords(e.bgWords, end)
+        return LyricLine(e.timeMs, end, split.text, split.words, background, bgWords)
+    }
+
+    /** [words] moved by [shift] ms (never before 0). */
+    private fun shifted(words: List<RawWord>, shift: Long): List<RawWord> =
+        if (shift == 0L) words else words.map { w ->
+            RawWord((w.startMs + shift).coerceAtLeast(0), w.explicitEndMs?.let { (it + shift).coerceAtLeast(0) }, w.text)
+        }
+
     private fun estimatedEnd(e: Entry): Long {
         val lastWord = e.words.lastOrNull()
-        if (lastWord != null) {
+        val timed = if (lastWord != null) {
             val wordEnd = lastWord.explicitEndMs ?: (lastWord.startMs + 1_500L)
-            return maxOf(wordEnd, lastWord.startMs + 500L, e.timeMs + 500L)
+            maxOf(wordEnd, lastWord.startMs + 500L, e.timeMs + 500L)
+        } else {
+            val wordCount = e.text.split(whitespace).count { it.isNotEmpty() }
+            e.timeMs + maxOf(MIN_LINE_MS, MS_PER_WORD * wordCount)
         }
-        val wordCount = e.text.split(whitespace).count { it.isNotEmpty() }
-        return e.timeMs + maxOf(MIN_LINE_MS, MS_PER_WORD * wordCount)
+        // Timed backing vocals can run past the lead.
+        val lastBg = e.bgWords.lastOrNull() ?: return timed
+        return maxOf(timed, lastBg.explicitEndMs ?: (lastBg.startMs + 1_000L))
     }
 
     private fun finishWords(words: List<RawWord>, lineEnd: Long): List<LyricWord> {
