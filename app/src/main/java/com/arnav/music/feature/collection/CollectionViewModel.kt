@@ -3,8 +3,12 @@ package com.arnav.music.feature.collection
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.arnav.music.core.common.Clock
+import com.arnav.music.core.db.PendingMatchEntity
+import com.arnav.music.core.importer.ImportMatcher
+import com.arnav.music.core.importer.MatchNowResult
 import com.arnav.music.core.repo.IntelligenceRepository
 import com.arnav.music.core.repo.LibraryRepository
+import com.arnav.music.core.youtube.YouTubeImporter
 import com.arnav.music.core.youtube.YouTubeRepository
 import com.arnav.music.domain.intelligence.SmartPlaylist
 import com.arnav.music.domain.model.ArtistKey
@@ -13,6 +17,7 @@ import com.arnav.music.domain.model.PlaylistKind
 import com.arnav.music.domain.model.Track
 import com.arnav.music.domain.provider.MusicError
 import com.arnav.music.domain.provider.SearchFilter
+import com.arnav.music.feature.library.describeYouTubeError
 import com.arnav.music.ui.CollectionKind
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,6 +42,10 @@ data class CollectionUi(
     val youtube: Boolean = false,
     val error: MusicError? = null,
     val historyDays: List<Pair<String, List<Track>>> = emptyList(),
+    /** Songs from a Spotify/CSV import not matched yet, in source order (shown dimmed after the tracks). */
+    val pending: List<PendingMatchEntity> = emptyList(),
+    /** Copied from the user's YouTube account; can be refreshed from YouTube. */
+    val youtubeImport: Boolean = false,
 )
 
 class CollectionViewModel(
@@ -44,6 +53,8 @@ class CollectionViewModel(
     private val intelligence: IntelligenceRepository,
     private val youtube: YouTubeRepository,
     private val clock: Clock,
+    private val matcher: ImportMatcher,
+    private val youtubeImporter: YouTubeImporter,
 ) : ViewModel() {
     private val _ui = MutableStateFlow(CollectionUi())
     val ui: StateFlow<CollectionUi> = _ui.asStateFlow()
@@ -52,6 +63,14 @@ class CollectionViewModel(
     private var job: Job? = null
     private var kind: CollectionKind = CollectionKind.LIKED
     private var id: String = ""
+    private var remoteRef: String? = null
+
+    /** Pending rows being matched right now (inline spinner). */
+    private val _matching = MutableStateFlow<Set<Long>>(emptySet())
+    val matching: StateFlow<Set<Long>> = _matching.asStateFlow()
+
+    private val _refreshing = MutableStateFlow(false)
+    val refreshing: StateFlow<Boolean> = _refreshing.asStateFlow()
 
     fun load(kind: CollectionKind, id: String) {
         if (job != null && this.kind == kind && this.id == id) return
@@ -61,9 +80,18 @@ class CollectionViewModel(
             when (kind) {
                 CollectionKind.LIKED -> library.likedTracks.collect { set(CollectionUi(false, "Liked songs", "", "Your favourites", tracks = it)) }
                 CollectionKind.LOCAL -> library.localTracks.collect { set(CollectionUi(false, "On this device", "", "Background playback · offline", tracks = it)) }
-                CollectionKind.PLAYLIST -> combine(library.playlist(id), library.playlistTracks(id)) { p, t -> p to t }.collect { (p, t) ->
+                CollectionKind.PLAYLIST -> combine(library.playlist(id), library.playlistTracks(id), matcher.pendingFor(id)) { p, t, pending -> Triple(p, t, pending) }.collect { (p, t, pending) ->
                     if (p == null || p.deleted) set(CollectionUi(false, "Playlist not found", error = MusicError.Unavailable))
-                    else set(CollectionUi(false, p.name, "", if (p.kind == PlaylistKind.YOUTUBE.name) "YouTube playlist" else "Arnav playlist", p.description, t, editable = p.kind == PlaylistKind.ARNAV.name, pinned = p.pinned))
+                    else {
+                        val imported = p.remoteRef != null && p.id.startsWith("ytimp_")
+                        remoteRef = if (imported) p.remoteRef else null
+                        set(
+                            CollectionUi(
+                                false, p.name, "", if (p.kind == PlaylistKind.YOUTUBE.name) "YouTube playlist" else "Arnav playlist", p.description, t,
+                                editable = p.kind == PlaylistKind.ARNAV.name, pinned = p.pinned, pending = pending, youtubeImport = imported,
+                            ),
+                        )
+                    }
                 }
                 CollectionKind.YOUTUBE_PLAYLIST -> {
                     val saved = library.playlist(id)
@@ -96,7 +124,12 @@ class CollectionViewModel(
 
     private fun set(ui: CollectionUi) {
         val total = ui.tracks.sumOf { it.durationMs ?: 0L }
-        _ui.value = ui.copy(subtitle = "${ui.tracks.size} ${if (ui.tracks.size == 1) "song" else "songs"}" + if (total > 0) " · " + com.arnav.music.domain.format.Formatters.longDuration(total) else "")
+        val waiting = ui.pending.count { !it.failed }
+        _ui.value = ui.copy(
+            subtitle = "${ui.tracks.size} ${if (ui.tracks.size == 1) "song" else "songs"}" +
+                (if (total > 0) " · " + com.arnav.music.domain.format.Formatters.longDuration(total) else "") +
+                (if (waiting > 0) " · $waiting waiting to match" else ""),
+        )
     }
 
     fun visibleTracks(ui: CollectionUi, q: String, s: SmartSort): List<Track> {
@@ -123,6 +156,49 @@ class CollectionViewModel(
         _ui.update { it.copy(savedToLibrary = true) }
     }
     fun duplicateAsArnav() = viewModelScope.launch { library.createPlaylist(_ui.value.title, tracks = _ui.value.tracks) }
+
+    // ---- Imported playlists ----
+
+    /** Searches YouTube for one waiting song now (the user tapped it). [onResult] gets a message to show. */
+    fun matchPending(row: PendingMatchEntity, onResult: (String) -> Unit) {
+        if (row.failed || row.id in _matching.value) return
+        _matching.update { it + row.id }
+        viewModelScope.launch {
+            val result = runCatching { matcher.matchNow(row.id) }.getOrDefault(MatchNowResult.Offline)
+            _matching.update { it - row.id }
+            when (result) {
+                is MatchNowResult.Matched -> onResult("Matched “${row.title}”")
+                MatchNowResult.NoMatch -> onResult("No good match for “${row.title}” on YouTube.")
+                MatchNowResult.QuotaLimited -> onResult("YouTube's free daily search limit is used up. This song will be tried again tomorrow.")
+                MatchNowResult.Offline -> onResult("Couldn't reach YouTube. It'll be matched automatically later.")
+                MatchNowResult.Gone -> Unit
+            }
+        }
+    }
+
+    fun removePending(row: PendingMatchEntity) = viewModelScope.launch { matcher.dismiss(row.id) }
+
+    /**
+     * Replaces this playlist's songs with the current YouTube version. The token is used for this
+     * call only and never stored.
+     */
+    fun refreshFromYouTube(token: String?, onResult: (String) -> Unit) {
+        val remote = remoteRef ?: return
+        if (token.isNullOrBlank()) { onResult("Google didn't return access. Try again."); return }
+        if (_refreshing.value) return
+        _refreshing.value = true
+        viewModelScope.launch {
+            runCatching { youtubeImporter.refresh(token, listOf(remote)) }
+                .onSuccess { s ->
+                    onResult(
+                        if (s.playlists > 0) "Refreshed from YouTube · ${s.tracks} ${if (s.tracks == 1) "song" else "songs"}"
+                        else "This playlist is no longer available on YouTube, so it was left as it was.",
+                    )
+                }
+                .onFailure { onResult(describeYouTubeError(it)) }
+            _refreshing.value = false
+        }
+    }
 
     // ---- Artist ----
     private val _artist = MutableStateFlow(CollectionUi())

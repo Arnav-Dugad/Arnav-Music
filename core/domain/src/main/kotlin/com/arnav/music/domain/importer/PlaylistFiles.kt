@@ -60,7 +60,7 @@ object PlaylistFiles {
     fun nameFromFile(fileName: String): String {
         val base = fileName.substringAfterLast('/').substringAfterLast('\\')
         val dot = base.lastIndexOf('.')
-        val name = (if (dot > 0) base.substring(0, dot) else base).replace('_', ' ').trim()
+        val name = (if (dot >= 0) base.substring(0, dot) else base).replace('_', ' ').trim()
         return name.ifBlank { "Imported playlist" }.take(100)
     }
 

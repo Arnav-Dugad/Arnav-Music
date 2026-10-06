@@ -141,7 +141,7 @@ object LrcParser {
         val display = StringBuilder()
         val lead = rest.substring(0, tags[0].range.first)
         display.append(lead)
-        if (lead.isNotBlank()) words.add(RawWord(lineStart, null, lead.trim()))
+        if (lead.isNotBlank()) words.add(RawWord(lineStart, null, normalize(lead)))
         for ((i, tag) in tags.withIndex()) {
             val t = toMs(tag.groupValues[1], tag.groupValues[2], tag.groupValues[3])
             // Any tag ends the word before it.
@@ -149,7 +149,7 @@ object LrcParser {
             val segEnd = if (i + 1 < tags.size) tags[i + 1].range.first else rest.length
             val seg = rest.substring(tag.range.last + 1, segEnd)
             display.append(seg)
-            if (seg.isNotBlank()) words.add(RawWord(t, null, seg.trim()))
+            if (seg.isNotBlank()) words.add(RawWord(t, null, normalize(seg)))
         }
         return normalize(display.toString()) to words
     }

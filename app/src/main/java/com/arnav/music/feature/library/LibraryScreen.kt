@@ -48,6 +48,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,6 +60,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -88,8 +90,9 @@ import com.arnav.music.ui.theme.glass
 import org.koin.compose.viewmodel.koinViewModel
 
 @Composable
-fun LibraryScreen(vm: LibraryViewModel = koinViewModel()) {
+fun LibraryScreen(vm: LibraryViewModel = koinViewModel(), importVm: PlaylistImportViewModel = koinViewModel()) {
     val c = ArnavTheme.colors
+    val ctx = LocalContext.current
     val nav = LocalNavigator.current
     val app = LocalAppViewModel.current
     val tab by vm.tab.collectAsStateWithLifecycle()
@@ -109,7 +112,22 @@ fun LibraryScreen(vm: LibraryViewModel = koinViewModel()) {
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { permissionTick++ }
     var sortOpen by remember { mutableStateOf(false) }
     var importOpen by remember { mutableStateOf(false) }
+    var importChooserOpen by remember { mutableStateOf(false) }
+    val matchProgress by importVm.progress.collectAsStateWithLifecycle()
     if (importOpen) YouTubeImportSheet({ importOpen = false })
+    if (importChooserOpen) ImportPlaylistsSheet(
+        onDismiss = { importChooserOpen = false },
+        onYouTube = { importChooserOpen = false; importOpen = true },
+        onOpenPlaylist = { id -> importChooserOpen = false; nav.go(Routes.collection(CollectionKind.PLAYLIST, id)) },
+    )
+    // Quiet daily refresh of playlists imported from YouTube: only when Google grants access without
+    // asking (consent was given before). Never shows any sign-in or consent UI on its own.
+    LaunchedEffect(Unit) {
+        if (importVm.silentRefreshDue()) {
+            val token = silentYouTubeToken(ctx)
+            if (token != null) importVm.refreshQuietly(token) else importVm.markRefreshChecked()
+        }
+    }
     val grid = layout == LibraryLayout.GRID
     val playingId = player.current?.id
 
@@ -135,7 +153,7 @@ fun LibraryScreen(vm: LibraryViewModel = koinViewModel()) {
                             LibrarySort.entries.forEach { s -> DropdownMenuItem(text = { Text(s.label, color = c.content) }, onClick = { vm.sort.value = s; sortOpen = false }) }
                         }
                     }
-                    ArnavIconButton(Icons.Rounded.CloudDownload, "Import from YouTube", { importOpen = true })
+                    ArnavIconButton(Icons.Rounded.CloudDownload, "Import playlists", { importChooserOpen = true })
                     ArnavIconButton(Icons.Rounded.Add, "New playlist", { nav.openSheet(SheetRequest.CreatePlaylist(emptyList())) })
                 }
                 Spacer(Modifier.height(Space.m))
@@ -155,6 +173,13 @@ fun LibraryScreen(vm: LibraryViewModel = koinViewModel()) {
                     items(LibraryTab.entries) { t -> Pill(t.label, t == tab, { vm.tab.value = t }) }
                 }
             }
+        }
+        if (matchProgress.open > 0) full {
+            ImportMatchBanner(
+                matchProgress,
+                onMatchMore = { importVm.matchMoreNow(); app.message("Matching more songs now. Stops early if YouTube's daily limit gets close.") },
+                modifier = Modifier.padding(bottom = Space.m),
+            )
         }
 
         when (tab) {
@@ -186,7 +211,7 @@ fun LibraryScreen(vm: LibraryViewModel = koinViewModel()) {
                 full { SectionLabel("Playlists") }
                 playlistItems(playlists, grid, layout)
                 if (playlists.isEmpty()) full {
-                    EmptyState(Icons.Rounded.LibraryMusic, "No playlists yet", "Create one, save any queue from the player, or bring your playlists over from YouTube.", action = "Import from YouTube", onAction = { importOpen = true })
+                    EmptyState(Icons.Rounded.LibraryMusic, "No playlists yet", "Create one, save any queue from the player, or bring your playlists over from YouTube, Spotify or a CSV file.", action = "Import playlists", onAction = { importChooserOpen = true })
                 }
             }
             LibraryTab.PLAYLISTS -> {

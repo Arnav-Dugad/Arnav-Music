@@ -36,6 +36,15 @@ import androidx.compose.material.icons.rounded.MusicOff
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.HourglassEmpty
+import androidx.compose.material.icons.rounded.SearchOff
+import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.semantics.Role
+import com.arnav.music.core.db.PendingMatchEntity
+import com.arnav.music.feature.library.rememberYouTubeAuthorizer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -92,6 +101,13 @@ fun CollectionScreen(kind: CollectionKind, id: String, vm: CollectionViewModel =
     val c = ArnavTheme.colors
     var editing by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var confirmRefresh by remember { mutableStateOf(false) }
+    val matching by vm.matching.collectAsStateWithLifecycle()
+    val refreshing by vm.refreshing.collectAsStateWithLifecycle()
+    val authorizeYouTube = rememberYouTubeAuthorizer(
+        onToken = { token -> vm.refreshFromYouTube(token) { msg -> app.message(msg) } },
+        onError = { msg -> app.message(msg) },
+    )
     LaunchedEffect(kind, id) { vm.load(kind, id) }
     val visible = remember(ui, filter, sort) { vm.visibleTracks(ui, filter, sort) }
     // "Shuffle liked" deep action from the command palette.
@@ -101,6 +117,15 @@ fun CollectionScreen(kind: CollectionKind, id: String, vm: CollectionViewModel =
         title = ui.title, subtitle = ui.subtitle, kindLabel = ui.kindLabel, description = ui.description, tracks = visible, allTracks = ui.tracks,
         loading = ui.loading, youtube = ui.youtube,
         actions = {
+            if (ui.youtubeImport) {
+                if (refreshing) {
+                    Box(Modifier.size(Space.touch), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(Modifier.size(20.dp), color = c.accent, strokeWidth = 2.dp)
+                    }
+                } else {
+                    ArnavIconButton(Icons.Rounded.Sync, "Refresh from YouTube", { confirmRefresh = true }, tint = c.contentMuted)
+                }
+            }
             if (ui.editable) {
                 ArnavIconButton(Icons.Rounded.PushPin, if (ui.pinned) "Unpin" else "Pin to top", vm::togglePin, tint = if (ui.pinned) c.accent else c.contentMuted)
                 ArnavIconButton(Icons.Rounded.Edit, "Rename", { editing = true }, tint = c.contentMuted)
@@ -115,6 +140,9 @@ fun CollectionScreen(kind: CollectionKind, id: String, vm: CollectionViewModel =
         error = ui.error,
         onRemove = if (ui.editable) { t -> vm.removeTrack(t) } else null,
         history = if (kind == CollectionKind.HISTORY) ui.historyDays else null,
+        pending = ui.pending, matchingIds = matching,
+        onPendingTap = { row -> vm.matchPending(row) { msg -> app.message(msg) } },
+        onPendingRemove = { row -> vm.removePending(row) },
         emptyTitle = when (kind) {
             CollectionKind.LIKED -> "Your favorites will appear here"
             CollectionKind.LOCAL -> "Bring your own library"
@@ -145,6 +173,15 @@ fun CollectionScreen(kind: CollectionKind, id: String, vm: CollectionViewModel =
             },
             confirmButton = { TextButton({ vm.rename(name, desc); editing = false }, enabled = name.isNotBlank()) { Text("Save") } },
             dismissButton = { TextButton({ editing = false }) { Text("Cancel") } },
+        )
+    }
+    if (confirmRefresh) {
+        AlertDialog(
+            onDismissRequest = { confirmRefresh = false }, containerColor = c.surfaceRaised,
+            title = { Text("Refresh from YouTube?") },
+            text = { Text("Refreshing replaces songs with the current YouTube version of this playlist. Songs you added or removed here in Arnav will be replaced too.") },
+            confirmButton = { TextButton({ confirmRefresh = false; authorizeYouTube() }) { Text("Refresh") } },
+            dismissButton = { TextButton({ confirmRefresh = false }) { Text("Cancel") } },
         )
     }
     if (confirmDelete) {
@@ -178,6 +215,8 @@ private fun CollectionScaffold(
     filter: String, onFilter: ((String) -> Unit)?, sort: SmartSort, onSort: ((SmartSort) -> Unit)?,
     error: MusicError?, onRemove: ((Track) -> Unit)?, history: List<Pair<String, List<Track>>>?,
     emptyTitle: String, emptyBody: String, round: Boolean = false,
+    pending: List<PendingMatchEntity> = emptyList(), matchingIds: Set<Long> = emptySet(),
+    onPendingTap: ((PendingMatchEntity) -> Unit)? = null, onPendingRemove: ((PendingMatchEntity) -> Unit)? = null,
 ) {
     val app = LocalAppViewModel.current
     val nav = LocalNavigator.current
@@ -248,7 +287,7 @@ private fun CollectionScaffold(
             when {
                 loading -> items(8) { TrackRowSkeleton() }
                 error != null && allTracks.isEmpty() -> item { ErrorBlock(error) }
-                allTracks.isEmpty() -> item { EmptyState(Icons.Rounded.MusicOff, emptyTitle, emptyBody) }
+                allTracks.isEmpty() && pending.isEmpty() -> item { EmptyState(Icons.Rounded.MusicOff, emptyTitle, emptyBody) }
                 history != null && filter.isBlank() -> historyItems(history, playingId, liked)
                 else -> itemsIndexed(tracks, key = { _, t -> t.id.value }) { i, t ->
                     TrackRow(
@@ -258,6 +297,26 @@ private fun CollectionScaffold(
                         leftSwipeRemoves = onRemove != null,
                         onMore = { nav.openSheet(SheetRequest.TrackActions(t)) },
                     )
+                }
+            }
+            if (!loading && history == null && pending.isNotEmpty()) {
+                val shown = if (filter.isBlank()) pending else pending.filter { it.title.contains(filter, true) || it.artist.contains(filter, true) }
+                val waiting = pending.count { !it.failed }
+                if (shown.isNotEmpty()) item(key = "pending_header") {
+                    Column(Modifier.fillMaxWidth().padding(start = Space.gutter, end = Space.gutter, top = Space.xl, bottom = Space.s)) {
+                        Text(
+                            if (waiting > 0) "$waiting waiting to match" else "Not matched",
+                            style = ArnavTheme.type.label, color = c.contentMuted,
+                        )
+                        Text(
+                            if (waiting > 0) "Matched to YouTube a few at a time, within the free daily search limit. Tap a song to match it now."
+                            else "No close enough upload was found on YouTube for these songs.",
+                            style = ArnavTheme.type.caption, color = c.contentSubtle,
+                        )
+                    }
+                }
+                items(shown, key = { "pending_${it.id}" }) { row ->
+                    PendingRow(row, matching = row.id in matchingIds, onTap = onPendingTap?.let { f -> { f(row) } }, onRemove = onPendingRemove?.let { f -> { f(row) } })
                 }
             }
             if (youtube) item(key = "attrib") {
@@ -283,6 +342,44 @@ private fun LazyListScope.historyItems(days: List<Pair<String, List<Track>>>, pl
             val nav = LocalNavigator.current
             TrackRow(t, { app.play(tracks, i) }, playing = t.id == playingId, liked = t.id in liked, onQueue = { app.addToQueue(t) }, onLike = { app.toggleLike(t) },
                 onMore = { nav.openSheet(SheetRequest.TrackActions(t)) })
+        }
+    }
+}
+
+/** A song from a Spotify/CSV import that has no YouTube match yet: dimmed, tap to match now. */
+@Composable
+private fun PendingRow(row: PendingMatchEntity, matching: Boolean, onTap: (() -> Unit)?, onRemove: (() -> Unit)?) {
+    val c = ArnavTheme.colors
+    val tappable = !row.failed && !matching && onTap != null
+    Row(
+        Modifier.fillMaxWidth()
+            .clickable(enabled = tappable, onClickLabel = "Match now", role = Role.Button) { onTap?.invoke() }
+            .padding(horizontal = Space.gutter, vertical = Space.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(Modifier.weight(1f).alpha(if (row.failed) 0.5f else 0.6f), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(48.dp).clip(RoundedCornerShape(Radius.s)).background(c.surfaceRaised), contentAlignment = Alignment.Center) {
+                Icon(if (row.failed) Icons.Rounded.SearchOff else Icons.Rounded.HourglassEmpty, null, tint = c.contentSubtle, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(Space.m))
+            Column(Modifier.weight(1f)) {
+                Text(row.title, style = ArnavTheme.type.body, color = c.content, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val status = when {
+                    matching -> "Matching…"
+                    row.failed -> "No match found"
+                    else -> "Waiting to match"
+                }
+                Text(
+                    listOf(row.artist, status).filter { it.isNotBlank() }.joinToString(" · "),
+                    style = ArnavTheme.type.caption, color = c.contentMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        when {
+            matching -> Box(Modifier.size(Space.touch), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(Modifier.size(20.dp), color = c.accent, strokeWidth = 2.dp)
+            }
+            row.failed && onRemove != null -> ArnavIconButton(Icons.Rounded.Close, "Remove “${row.title}”", onRemove, tint = c.contentMuted)
         }
     }
 }

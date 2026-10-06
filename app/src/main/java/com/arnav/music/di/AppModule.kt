@@ -102,6 +102,7 @@ val appModule = module {
     single { com.arnav.music.core.update.UpdateManager(androidContext(), get(), get()) }
     single { com.arnav.music.core.youtube.UploadResolver(get()) }
     single { com.arnav.music.core.youtube.YouTubeImporter(get(), get(), get()) }
+    single { com.arnav.music.core.lyrics.LyricsRepository(androidContext(), get<ArnavDatabase>().lyrics()) }
     single { PlaybackController(androidContext(), get(), get(), get(), get(), get(), get()) }
 
     viewModel { AppViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }

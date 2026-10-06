@@ -68,6 +68,12 @@ import com.arnav.music.ui.components.SourceBadge
 import com.arnav.music.ui.theme.ArnavTheme
 import com.arnav.music.ui.theme.Radius
 import com.arnav.music.ui.theme.Space
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.runtime.collectAsState
+import com.arnav.music.core.playback.PlaybackController
+import com.arnav.music.ui.lyrics.LyricsPanel
+import com.arnav.music.ui.lyrics.StaticLyricsPanel
+import org.koin.compose.koinInject
 
 /** Which sheet is open. Exactly one at a time, owned by the app root. */
 sealed interface SheetRequest {
@@ -116,6 +122,7 @@ fun TrackActionsSheet(
             Column(Modifier.weight(1f)) {
                 Text(track.title, style = ArnavTheme.type.title, color = c.content, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(track.artist, style = ArnavTheme.type.bodySmall, color = c.contentMuted, maxLines = 1)
+                if (track.source == SourceType.LOCAL) com.arnav.music.core.analysis.TrackAnalysisLine(track.id.value, c.contentSubtle)
             }
             SourceBadge(track.source == SourceType.YOUTUBE)
         }
@@ -246,22 +253,47 @@ fun SleepTimerSheet(current: SleepTimer?, onDismiss: () -> Unit, onSet: (SleepTi
 }
 
 /**
- * Lyrics are shown only from sources licensed for display. No scraping. Until a licensed
- * provider is configured this is an honest, designed empty state.
+ * Lyrics for any track from the actions menu. Lyrics come only from the user's own song file,
+ * an .lrc/.txt they import, or text they paste — never from websites. When the track is the one
+ * playing, the lyrics follow playback; otherwise every line is shown at rest.
  */
 @Composable
 fun LyricsSheet(track: Track, onDismiss: () -> Unit) {
+    val c = ArnavTheme.colors
+    val playback = koinInject<PlaybackController>()
+    val player by playback.state.collectAsState()
+    val isCurrent = player.current?.id == track.id
     ArnavSheet(onDismiss) {
-        EmptyState(
-            Icons.Rounded.Lyrics,
-            "Lyrics aren't available yet",
-            "Arnav Music only shows lyrics from licensed providers. “${track.title.take(40)}” has no licensed lyrics source connected.",
-        )
-        Box(Modifier.fillMaxWidth().padding(horizontal = Space.gutter)) {
-            Text(
-                "We never copy lyrics from websites — it isn't fair to songwriters.",
-                style = ArnavTheme.type.caption, color = ArnavTheme.colors.contentSubtle, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
-            )
+        Column(Modifier.fillMaxWidth().fillMaxHeight(0.85f)) {
+            Row(Modifier.padding(horizontal = Space.gutter, vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
+                Artwork(track.artworkUrl, track.id.value, Modifier.size(44.dp), RoundedCornerShape(Radius.s))
+                Spacer(Modifier.width(Space.m))
+                Column(Modifier.weight(1f)) {
+                    Text(track.title, style = ArnavTheme.type.titleSmall, color = c.content, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(track.artist, style = ArnavTheme.type.caption, color = c.contentMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            if (isCurrent) {
+                val progress by playback.progress.collectAsState()
+                LyricsPanel(
+                    track = track,
+                    progress = progress,
+                    isPlaying = player.isPlaying,
+                    onSeek = { playback.seekTo(it) },
+                    on = c.content,
+                    muted = c.contentMuted,
+                    accent = c.accent,
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                )
+            } else {
+                StaticLyricsPanel(
+                    track = track,
+                    on = c.content,
+                    muted = c.contentMuted,
+                    accent = c.accent,
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                )
+            }
         }
     }
 }
