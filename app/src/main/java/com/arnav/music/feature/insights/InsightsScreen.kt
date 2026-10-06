@@ -94,6 +94,7 @@ fun InsightsScreen(vm: InsightsViewModel = koinViewModel()) {
     val machine by vm.timeMachine.collectAsStateWithLifecycle()
     val streak by vm.streak.collectAsStateWithLifecycle()
     val milestones by vm.milestones.collectAsStateWithLifecycle()
+    val heatmap by vm.heatmap.collectAsStateWithLifecycle()
     val db = koinInject<ArnavDatabase>()
     val analyzedFlow = remember(db) { db.audioFeatures().analyzedCount() }
     val analyzedCount by analyzedFlow.collectAsStateWithLifecycle(0)
@@ -170,6 +171,11 @@ fun InsightsScreen(vm: InsightsViewModel = koinViewModel()) {
         val st = streak
         if (st != null && (st.longest > 0 || milestones.any { it.progress > 0f })) item {
             Section("Streaks & milestones") { StreaksAndMilestones(st, milestones) }
+        }
+        // ---- Listening calendar ----
+        val grid = heatmap
+        if (grid != null) item {
+            Section("Listening calendar") { ListeningHeatmap(grid) }
         }
         // ---- Listening clock ----
         item {

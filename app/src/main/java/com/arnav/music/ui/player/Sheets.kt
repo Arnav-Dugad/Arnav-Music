@@ -122,6 +122,7 @@ fun TrackActionsSheet(
             Column(Modifier.weight(1f)) {
                 Text(track.title, style = ArnavTheme.type.title, color = c.content, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(track.artist, style = ArnavTheme.type.bodySmall, color = c.contentMuted, maxLines = 1)
+                com.arnav.music.feature.insights.TrackPlayCountLine(track.id, c.contentSubtle)
                 if (track.source == SourceType.LOCAL) com.arnav.music.core.analysis.TrackAnalysisLine(track.id.value, c.contentSubtle)
             }
             SourceBadge(track.source == SourceType.YOUTUBE)

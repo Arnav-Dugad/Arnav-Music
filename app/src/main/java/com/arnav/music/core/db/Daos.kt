@@ -50,6 +50,8 @@ data class PlaylistWithCount(
 
 @Dao
 interface PlaylistDao {
+    @Query("SELECT pt.* FROM playlist_tracks pt INNER JOIN playlists p ON p.id = pt.playlistId WHERE p.deleted = 0 AND p.kind = 'ARNAV'")
+    suspend fun activeEntries(): List<PlaylistTrackEntity>
     @Query(
         """SELECT p.id, p.name, p.description, p.kind, p.artworkUrl, p.pinned, p.updatedAt,
            (SELECT COUNT(*) FROM playlist_tracks pt WHERE pt.playlistId = p.id) AS trackCount
@@ -91,6 +93,8 @@ data class TrackPlayCount(val trackId: String, val plays: Int, val lastPlayed: L
 
 @Dao
 interface PlayEventDao {
+    @Query("SELECT COUNT(*) AS plays, MIN(startedAt) AS firstPlayed, MAX(startedAt) AS lastPlayed FROM play_events WHERE trackId = :trackId AND listenedMs >= 30000")
+    suspend fun playStats(trackId: String): PlayStatsRow
     @Insert suspend fun insert(e: PlayEventEntity)
     @Query("SELECT * FROM play_events WHERE startedAt >= :since ORDER BY startedAt ASC")
     suspend fun since(since: Long): List<PlayEventEntity>
@@ -178,3 +182,5 @@ interface ImportHistoryDao {
     @Query("SELECT * FROM import_history WHERE id = :id") suspend fun get(id: String): ImportHistoryEntity?
     @Query("DELETE FROM import_history WHERE id = :id") suspend fun delete(id: String)
 }
+
+data class PlayStatsRow(val plays: Int, val firstPlayed: Long?, val lastPlayed: Long?)

@@ -36,6 +36,8 @@ class CoreLogicTest {
         assertEquals(ArtistKey.of("Daft Punk - Topic"), ArtistKey.of("daft punk"))
         assertEquals(ArtistKey.of("TaylorSwiftVEVO"), ArtistKey.of("Taylor Swift"))
         assertEquals(ArtistKey.of("Drake feat. Rihanna"), ArtistKey.of("Drake"))
+        assertEquals("daftpunk", ArtistKey.of("Daft Punk"))
+        assertEquals(ArtistKey.of("Drake (ft. Rihanna)"), ArtistKey.of("Drake"))
     }
 
     @Test fun `sync merge last write wins and tombstones`() {

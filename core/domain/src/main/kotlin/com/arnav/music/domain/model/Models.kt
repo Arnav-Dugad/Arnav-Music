@@ -55,7 +55,8 @@ data class Track(
 }
 
 object ArtistKey {
-    private val featRegex = Regex("""\s*(\(|\[)?\s*(feat\.?|ft\.?|featuring|with)\s.*$""", RegexOption.IGNORE_CASE)
+    // "feat." must start a word (after a space or a bracket): otherwise "Daft Punk" would lose "ft Punk".
+    private val featRegex = Regex("""(?:\s+|\s*[(\[]\s*)(feat\.?|ft\.?|featuring|with)\s.*$""", RegexOption.IGNORE_CASE)
     private val topicSuffix = Regex("""\s*-\s*topic$""", RegexOption.IGNORE_CASE)
     private val vevoSuffix = Regex("""vevo$""", RegexOption.IGNORE_CASE)
 
