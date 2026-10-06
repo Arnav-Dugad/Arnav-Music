@@ -194,7 +194,7 @@ private fun ModeChip(mode: AiUnavailableReason?) {
         AiUnavailableReason.NOT_CONFIGURED -> "On-device mode" to "Cloud AI isn't set up in this build. The local engine handles requests."
         AiUnavailableReason.DAILY_LIMIT, AiUnavailableReason.QUOTA -> "On-device mode" to "Today's free AI allowance is used. The local engine takes over until tomorrow."
         AiUnavailableReason.APP_CHECK -> "On-device mode" to "App Check couldn't verify this install (APKs from GitHub aren't vouched for by Google Play), so cloud AI is blocked. Fix it in Settings → Arnav AI → Cloud AI on this phone. Until then the local engine answers."
-        else -> "On-device mode" to "The local engine handles requests right now."
+        else -> "On-device mode" to "The local engine handles requests right now. Settings → Arnav AI shows the last cloud error."
     }
     Row(Modifier.clip(RoundedCornerShape(Radius.m)).background(c.content.copy(alpha = 0.06f)).padding(horizontal = Space.m, vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
         Icon(if (mode == null) Icons.Rounded.CheckCircle else Icons.Rounded.PhoneAndroid, null, tint = if (mode == null) c.success else c.accent, modifier = Modifier.size(16.dp))
