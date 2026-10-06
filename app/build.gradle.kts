@@ -153,6 +153,7 @@ dependencies {
     implementation(libs.androidx.credentials.play)
     implementation(libs.googleid)
     implementation(libs.glance.appwidget)
+    implementation(libs.glance.material3)
     implementation(libs.play.services.auth)
 
     implementation(platform(libs.compose.bom))

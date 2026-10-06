@@ -7,7 +7,6 @@ import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -35,16 +34,13 @@ import androidx.glance.layout.Column
 import androidx.glance.layout.ContentScale
 import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
-import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
-import androidx.glance.layout.padding
 import androidx.glance.layout.size
 import androidx.glance.layout.width
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
-import androidx.glance.unit.ColorProvider
 import com.arnav.music.MainActivity
 import com.arnav.music.R
 import com.arnav.music.core.playback.PlaybackController
@@ -60,30 +56,32 @@ class ArnavWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val initial = WidgetBus.current(context)
         withContext(Dispatchers.IO) { WidgetBus.ensureArt(context, initial.artworkUrl) }
+        Widgets.load()
         provideContent {
             // Observed inside the composition: Glance doesn't re-run provideGlance for a live session.
             val snap by WidgetBus.snapshot.collectAsState()
             val art by WidgetBus.art.collectAsState()
+            val materialYou by Widgets.materialYou.collectAsState()
             val s = snap ?: initial
-            Content(context, s, art.bitmap.takeIf { art.url == s.artworkUrl })
+            WidgetTheme(materialYou) {
+                Content(context, s, art.bitmap.takeIf { art.url == s.artworkUrl })
+            }
         }
     }
 
     @Composable
     private fun Content(context: Context, s: WidgetSnapshot, art: Bitmap?) {
         val tall = LocalSize.current.height >= 100.dp
-        val white = ColorProvider(Color.White)
-        val muted = ColorProvider(Color(0xB3FFFFFF))
+        val p = widgetPalette()
         val open = openPlayerAction(context)
-        Column(
-            GlanceModifier.fillMaxSize().cornerRadius(24.dp).background(Color(0xFF15121F)).padding(12.dp),
-        ) {
+        // The compact (one-row) size is too short for the 16 dp Material 3 padding.
+        Column(GlanceModifier.widgetRoot(p, if (tall) p.padding(12.dp) else 12.dp)) {
             Row(GlanceModifier.fillMaxWidth().clickable(open), verticalAlignment = Alignment.CenterVertically) {
                 Artwork(art, if (tall) 64 else 44)
                 Spacer(GlanceModifier.width(12.dp))
                 Column(GlanceModifier.defaultWeight()) {
-                    Text(s.title ?: "Arnav Music", style = TextStyle(color = white, fontSize = 15.sp, fontWeight = FontWeight.Bold), maxLines = 1)
-                    Text(s.artist ?: "Tap to start listening", style = TextStyle(color = muted, fontSize = 12.sp), maxLines = 1)
+                    Text(s.title ?: "Arnav Music", style = TextStyle(color = p.title, fontSize = 15.sp, fontWeight = FontWeight.Bold), maxLines = 1)
+                    Text(s.artist ?: "Tap to start listening", style = TextStyle(color = p.body, fontSize = 12.sp), maxLines = 1)
                 }
             }
             if (tall) {
@@ -131,13 +129,15 @@ class ArnavWidgetReceiver : GlanceAppWidgetReceiver() {
 internal fun openPlayerAction(context: Context): Action =
     actionStartActivity(Intent(context, MainActivity::class.java).putExtra(MainActivity.EXTRA_OPEN_PLAYER, true))
 
+/** Cover art (keeps its own colours) or a themed placeholder. */
 @Composable
 internal fun Artwork(art: Bitmap?, sizeDp: Int) {
     if (art != null) {
         Image(ImageProvider(art), contentDescription = null, contentScale = ContentScale.Crop, modifier = GlanceModifier.size(sizeDp.dp).cornerRadius(14.dp))
     } else {
-        Box(GlanceModifier.size(sizeDp.dp).cornerRadius(14.dp).background(Color(0xFF2A1F5C)), contentAlignment = Alignment.Center) {
-            Image(ImageProvider(R.drawable.ic_stat_arnav), contentDescription = null, modifier = GlanceModifier.size(22.dp))
+        val p = widgetPalette()
+        Box(GlanceModifier.size(sizeDp.dp).cornerRadius(14.dp).background(p.artPlaceholder), contentAlignment = Alignment.Center) {
+            Image(ImageProvider(R.drawable.ic_stat_arnav), contentDescription = null, modifier = GlanceModifier.size(22.dp), colorFilter = p.artPlaceholderIcon)
         }
     }
 }
@@ -153,14 +153,24 @@ internal fun TransportButtons(context: Context, s: WidgetSnapshot) {
     WidgetButton(
         if (s.playing) R.drawable.ic_w_pause else R.drawable.ic_w_play, if (s.playing) "Pause" else "Play",
         if (s.youtube && !s.playing) open else actionRunCallback<PlayPauseAction>(),
+        primary = true,
     )
     WidgetButton(R.drawable.ic_w_next, "Next", if (s.youtube) open else actionRunCallback<NextAction>())
 }
 
+/** Round icon button; [primary] gets a filled container in the Material You style. */
 @Composable
-internal fun WidgetButton(icon: Int, label: String, action: Action) {
-    Box(GlanceModifier.size(40.dp).cornerRadius(20.dp).clickable(action), contentAlignment = Alignment.Center) {
-        Image(ImageProvider(icon), contentDescription = label, modifier = GlanceModifier.size(22.dp))
+internal fun WidgetButton(icon: Int, label: String, action: Action, primary: Boolean = false) {
+    val p = widgetPalette()
+    val container = if (primary) p.primaryButton else null
+    val base = GlanceModifier.size(40.dp).cornerRadius(20.dp)
+    Box((if (container != null) base.background(container) else base).clickable(action), contentAlignment = Alignment.Center) {
+        Image(
+            ImageProvider(icon),
+            contentDescription = label,
+            modifier = GlanceModifier.size(22.dp),
+            colorFilter = if (container != null) p.primaryIcon else p.icon,
+        )
     }
 }
 
