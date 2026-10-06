@@ -131,7 +131,8 @@ fun ArnavAppRoot(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled: () ->
     val state by vm.playerState.collectAsStateWithLifecycle()
     val track = state.current
     val mode = surfaceMode(settings)
-    val palette = rememberArtworkPalette(track?.artworkUrl, mode)
+    // Every palette colour crossfades between songs, so the whole theme glides with the music.
+    val palette = com.arnav.music.ui.artwork.animatePalette(rememberArtworkPalette(track?.artworkUrl, mode), durationMs = if (budget.reducedMotion) 0 else 900)
 
     val loaded by vm.settingsLoaded.collectAsStateWithLifecycle()
     ThemeRevealHost(reduceMotion = budget.reducedMotion) {

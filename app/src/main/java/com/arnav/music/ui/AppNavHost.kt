@@ -67,8 +67,16 @@ fun AppNavHost(nav: NavHostController) {
             val top = targetState.destination.route in Routes.topLevel
             if (top) fadeOut(motion.fast()) else fadeOut(motion.fast()) + scaleOut(motion.fast(), 0.97f)
         },
-        popEnterTransition = { fadeIn(motion.fast()) + scaleIn(motion.fast(), 0.97f) },
-        popExitTransition = { slideOutHorizontally(motion.offsetSpring()) { (it * 0.18f * travel).toInt() } + fadeOut(motion.fast()) },
+        // Android 15-style predictive back: while you swipe, the page shrinks toward the swipe edge and
+        // the one underneath rises from slightly behind. Tweens so the gesture can scrub them linearly.
+        popEnterTransition = {
+            fadeIn(androidx.compose.animation.core.tween(300)) + scaleIn(androidx.compose.animation.core.tween(300, easing = Easing.Emphasized), if (motion.reduced) 1f else 0.94f)
+        },
+        popExitTransition = {
+            scaleOut(androidx.compose.animation.core.tween(300, easing = Easing.Emphasized), if (motion.reduced) 1f else 0.9f) +
+                slideOutHorizontally(androidx.compose.animation.core.tween(300, easing = Easing.Emphasized)) { (it * 0.12f * travel).toInt() } +
+                fadeOut(androidx.compose.animation.core.tween(240))
+        },
     ) {
         screen(Routes.HOME) { HomeScreen() }
         screen(Routes.EXPLORE) { ExploreScreen() }

@@ -173,7 +173,7 @@ private fun YouTubePreview(videoId: String) {
                 override fun onReady(youTubePlayer: YouTubePlayer) {
                     youTubePlayer.loadVideo(videoId, 45f)
                 }
-            }, true, IFramePlayerOptions.Builder(context).controls(1).fullscreen(0).rel(0).build())
+            }, true, IFramePlayerOptions.Builder(context).controls(0).fullscreen(0).rel(0).ivLoadPolicy(3).build())
         }
     }
     DisposableEffect(lifecycle) {

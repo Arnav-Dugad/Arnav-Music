@@ -206,6 +206,8 @@ private fun AppearancePage(vm: SettingsViewModel) {
             Divider()
             ToggleRow("Beat-synced light", s.beatVisuals, { v -> vm.update { it.copy(beatVisuals = v) } }, "Songs on this phone: the backdrop breathes gently with the beat once analyzed. Never flashes")
             Divider()
+            ToggleRow("Material You widgets", s.widgetMaterialYou, { v -> vm.update { it.copy(widgetMaterialYou = v) } }, "Widgets take their colours from your wallpaper (Android 12+); off keeps the dark glass look")
+            Divider()
             ToggleRow("Ambient edge glow", s.ambientEdgeGlow, { v -> vm.update { it.copy(ambientEdgeGlow = v) } }, "OLED theme: after 8 s idle in Now Playing the screen sinks to black with a hairline of progress light around the edge")
         }
     }
@@ -261,6 +263,12 @@ private fun PlaybackPage(vm: SettingsViewModel) {
             ToggleRow("Picture-in-picture", s.floatingPlayer, { v -> vm.update { it.copy(floatingPlayer = v) } }, "Play, pause and skip right from the window")
             Divider()
             ToggleRow("Lyrics in the mini player", s.miniPlayerLyrics, { v -> vm.update { it.copy(miniPlayerLyrics = v) } }, "Shows the line being sung under the title when synced lyrics are available")
+            Divider()
+            ToggleRow("Lyrics translation", s.lyricsTranslation, { v -> vm.update { it.copy(lyricsTranslation = v) } }, "A translation into your phone's language under each line (on-device; downloads a language model once)")
+            Divider()
+            ToggleRow("Lyrics romanisation", s.lyricsRomanization, { v -> vm.update { it.copy(lyricsRomanization = v) } }, "Latin letters under lines written in other scripts (Android 10+)")
+            Divider()
+            ToggleRow("Endless radio", s.endlessRadio, { v -> vm.update { it.copy(endlessRadio = v) } }, "When the queue ends, keep going with songs picked for you")
             Divider()
             ToggleRow("Online lyrics (LRCLIB)", s.onlineLyrics, { v -> vm.update { it.copy(onlineLyrics = v) } }, "Fetches time-synced lyrics from LRCLIB, an open community database, when a song has none on this device. Saved after the first look-up")
         }
@@ -354,6 +362,8 @@ private fun LibraryPage(vm: SettingsViewModel) {
             val dao = org.koin.compose.koinInject<com.arnav.music.core.db.ArnavDatabase>().audioFeatures()
             val analyzedFlow = androidx.compose.runtime.remember(dao) { dao.analyzedCount() }
             val analyzed by analyzedFlow.collectAsStateWithLifecycle(initialValue = 0)
+            ToggleRow("Fix missing song info", s.autoTagLocal, { v -> vm.update { it.copy(autoTagLocal = v) } }, "Fills in missing artist, album and cover for songs on this phone from MusicBrainz, on Wi-Fi. Your files are never changed")
+            Divider()
             ToggleRow("Analyze while charging", s.analyzeLocalAudio, { v -> vm.update { it.copy(analyzeLocalAudio = v) } }, "Runs quietly in the background, only when plugged in")
             Divider()
             InfoRow("Songs analyzed", "$analyzed")

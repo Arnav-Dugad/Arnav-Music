@@ -1,5 +1,8 @@
 package com.arnav.music.feature.collection
 
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.material.icons.rounded.AddToHomeScreen
 import com.arnav.music.ui.theme.AccentScope
 import com.arnav.music.ui.sharedArt
@@ -251,17 +254,43 @@ private fun CollectionScaffold(
                 .graphicsLayer { translationY = if (listState.firstVisibleItemIndex == 0) -listState.firstVisibleItemScrollOffset * 0.4f else -420.dp.toPx() }
                 .background(Brush.verticalGradient(listOf(Color(palette.backdrop), c.background))),
         )
+        // Collapsing header: 0 while the hero is fully visible → 1 once it has scrolled under the top bar.
+        val collapse by remember {
+            derivedStateOf {
+                val hero = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == "hero" }
+                when {
+                    hero != null -> (-hero.offset.toFloat() / (hero.size * 0.75f).coerceAtLeast(1f)).coerceIn(0f, 1f)
+                    listState.firstVisibleItemIndex > 1 -> 1f
+                    else -> 0f
+                }
+            }
+        }
+        var heroBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+        // Play makes the cover fly from the header into Now Playing, whose colours take over the page.
+        val playFromHero: (Boolean) -> Unit = { shuffle ->
+            app.play(tracks, 0, shuffle = shuffle)
+            heroBounds?.let(nav.flyFrom)
+        }
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = chrome.calculateBottomPadding() + Space.xl)) {
             item(key = "top") {
-                Row(Modifier.statusBarsPadding().fillMaxWidth().padding(horizontal = Space.xs), verticalAlignment = Alignment.CenterVertically) {
-                    ArnavIconButton(Icons.AutoMirrored.Rounded.ArrowBack, "Back", nav::back)
-                    Spacer(Modifier.weight(1f))
-                    actions()
-                }
+                // Space for the pinned top bar drawn above the list.
+                Spacer(Modifier.statusBarsPadding().height(Space.touch))
             }
             item(key = "hero") {
                 Column(Modifier.fillMaxWidth().padding(horizontal = Space.gutter), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Mosaic(art, title, Modifier.sharedArt(sharedKey).size(220.dp).graphicsLayer { shadowElevation = 24.dp.toPx(); shape = if (round) CircleShape else RoundedCornerShape(Radius.heroArtwork); clip = true },
+                    // Parallax: the cover drifts down slower than the list, shrinks and fades as it goes.
+                    Mosaic(art, title, Modifier.sharedArt(sharedKey).size(220.dp)
+                        .onGloballyPositioned { heroBounds = it.boundsInRoot() }
+                        .graphicsLayer {
+                            val p = collapse
+                            val hero = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == "hero" }
+                            translationY = (-(hero?.offset ?: 0)).coerceAtLeast(0) * 0.45f
+                            val sc = 1f - 0.22f * p
+                            scaleX = sc; scaleY = sc
+                            alpha = 1f - 0.85f * p
+                            shadowElevation = 24.dp.toPx() * (1f - p)
+                            shape = if (round) CircleShape else RoundedCornerShape(Radius.heroArtwork); clip = true
+                        },
                         shape = if (round) CircleShape else RoundedCornerShape(Radius.heroArtwork))
                     Spacer(Modifier.height(Space.xl))
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -278,8 +307,8 @@ private fun CollectionScaffold(
                     Text(subtitle, style = ArnavTheme.type.caption, color = c.contentSubtle)
                     Spacer(Modifier.height(Space.l))
                     Row(horizontalArrangement = Arrangement.spacedBy(Space.m)) {
-                        PrimaryButton("Play", { app.play(tracks, 0) }, enabled = tracks.isNotEmpty(), icon = Icons.Rounded.PlayArrow)
-                        SecondaryButton("Shuffle", { app.play(tracks, 0, shuffle = true) }, icon = Icons.Rounded.Shuffle, enabled = tracks.size > 1)
+                        PrimaryButton("Play", { playFromHero(false) }, enabled = tracks.isNotEmpty(), icon = Icons.Rounded.PlayArrow)
+                        SecondaryButton("Shuffle", { playFromHero(true) }, icon = Icons.Rounded.Shuffle, enabled = tracks.size > 1)
                     }
                 }
             }
@@ -338,6 +367,26 @@ private fun CollectionScaffold(
                 Text("Music and metadata from YouTube. Plays in the official YouTube player.", style = ArnavTheme.type.caption, color = c.contentSubtle,
                     modifier = Modifier.fillMaxWidth().padding(Space.gutter), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
+        }
+        // Pinned top bar: clear over the hero, then a tinted bar carrying the title once it collapses.
+        val barTint = androidx.compose.ui.graphics.lerp(c.background, Color(palette.backdrop), 0.55f)
+        Row(
+            Modifier.fillMaxWidth()
+                .background(barTint.copy(alpha = 0.97f * collapse))
+                .statusBarsPadding()
+                .height(Space.touch)
+                .padding(horizontal = Space.xs),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ArnavIconButton(Icons.AutoMirrored.Rounded.ArrowBack, "Back", nav::back)
+            Text(
+                title, style = ArnavTheme.type.titleSmall, color = c.content, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).padding(horizontal = Space.s).graphicsLayer {
+                    val t = ((collapse - 0.6f) / 0.4f).coerceIn(0f, 1f)
+                    alpha = t; translationY = (1f - t) * 8.dp.toPx()
+                },
+            )
+            actions()
         }
     }
     }

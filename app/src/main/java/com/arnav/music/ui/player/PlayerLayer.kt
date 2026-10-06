@@ -6,6 +6,11 @@ import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode as AnimRepeatMode
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -77,6 +82,7 @@ import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -225,6 +231,19 @@ fun PlayerLayer(
         trackId = track.id.value.takeIf { !isYouTube && sheetVisible && !pip },
         progress = progress, isPlaying = state.isPlaying, enabled = settings.beatVisuals,
     )
+
+    // The cover breathes very slowly while music plays and settles back (smaller) when paused.
+    val coverRest by animateFloatAsState(
+        if (state.isPlaying || isYouTube) 1f else 0.9f,
+        if (motion.reduced) snap() else spring(dampingRatio = 0.62f, stiffness = 180f),
+        label = "coverRest",
+    )
+    val breathing = state.isPlaying && !isYouTube && !motion.reduced && settledOpen && !lyricsOpen && !pip
+    val breath = if (breathing) {
+        val inf = rememberInfiniteTransition(label = "breath")
+        inf.animateFloat(0f, 1f, infiniteRepeatable(tween(4_800, easing = LinearEasing), AnimRepeatMode.Reverse), label = "breathT")
+    } else null
+    val coverScale = { coverRest * (1f + 0.014f * (breath?.value ?: 0f)) }
 
     fun animateTo(target: Float) = scope.launch {
         if (target == 1f) haptics.navigate()
@@ -396,7 +415,11 @@ fun PlayerLayer(
                 .requiredSize(with(density) { surfW.toDp() }, with(density) { surfH.toDp() })
                 .graphicsLayer {
                     transformOrigin = TransformOrigin(0f, 0f)
-                    scaleX = scale; scaleY = scale
+                    // Breathing/settling scales around the cover's centre, only once Now Playing is open.
+                    val k = if (!isYouTube && !pip) 1f + (coverScale() - 1f) * e else 1f
+                    scaleX = scale * k; scaleY = scale * k
+                    translationX = size.width * scale * (1f - k) / 2f
+                    translationY = size.height * scale * (1f - k) / 2f
                     alpha = if (carousel) 0f else if (!isYouTube) 1f - lyricsFullT else 1f
                     shadowElevation = if (pip) 0f else max(e, if (dock != null) 0.5f else 0f) * 24.dp.toPx()
                     shape = RoundedCornerShape(corner)
@@ -460,6 +483,7 @@ fun PlayerLayer(
                 state = state, topPx = fullTop, itemWidthPx = fullW, screenWidthPx = W,
                 onSettle = actions.skipTo,
                 onPullDown = { dy -> scope.launch { expand.snapTo((expand.value - dy / (H - barTop)).coerceIn(0f, 1f)) } },
+                currentScale = coverScale,
                 onPullEnd = { v -> animateTo(if (v > 1000f || expand.value < 0.75f) 0f else 1f) },
                 onTap = { immersive = !immersive },
                 onLongPress = { t -> haptics.longPress(); actions.onMore(t) },
@@ -509,6 +533,7 @@ private fun CoverCarousel(
     onLongPress: (Track) -> Unit,
     onPullDown: (Float) -> Unit = {},
     onPullEnd: (Float) -> Unit = {},
+    currentScale: () -> Float = { 1f },
 ) {
     val density = LocalDensity.current
     val items = state.queue.items
@@ -544,7 +569,7 @@ private fun CoverCarousel(
         Box(
             Modifier.fillMaxSize().graphicsLayer {
                 val d = kotlin.math.abs((pager.currentPage - page) + pager.currentPageOffsetFraction).coerceIn(0f, 1f)
-                val sc = 1f - 0.12f * d
+                val sc = (1f - 0.12f * d) * (1f + (currentScale() - 1f) * (1f - d))
                 scaleX = sc; scaleY = sc
                 alpha = 1f - 0.45f * d
                 shadowElevation = (1f - d) * 24.dp.toPx()
@@ -631,7 +656,7 @@ private fun YouTubeSurface(engine: YouTubeEngine, modifier: Modifier) {
         YouTubePlayerView(context).apply {
             enableAutomaticInitialization = false
             initialize(engine.listener, true, // Origin https://<package> identifies this app to YouTube (required for embeds; avoids error 152/153).
-            IFramePlayerOptions.Builder(context).controls(1).fullscreen(0).rel(0).build())
+            IFramePlayerOptions.Builder(context).controls(0).fullscreen(0).rel(0).ivLoadPolicy(3).build())
         }
     }
     DisposableEffect(lifecycle) {
@@ -925,7 +950,8 @@ private fun Transport(
     on: Color, muted: Color, accent: Color, actions: PlayerActions, onQueue: () -> Unit,
     onLyrics: () -> Unit, lyricsOpen: Boolean,
 ) {
-    SeekBar(progress, state.capabilities.canSeek, accent, on, muted, actions.seekTo)
+    val envelope = if (track.source == SourceType.LOCAL) rememberEnvelope(track.id.value) else null
+    SeekBar(progress, state.capabilities.canSeek, accent, on, muted, actions.seekTo, envelope)
     Spacer(Modifier.height(Space.m))
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
         ArnavIconButton(Icons.Rounded.Shuffle, if (state.queue.shuffled) "Shuffle on" else "Shuffle off", actions.toggleShuffle, tint = if (state.queue.shuffled) accent else muted)
@@ -953,7 +979,7 @@ private fun Transport(
 }
 
 @Composable
-private fun SeekBar(progress: Progress, canSeek: Boolean, accent: Color, on: Color, muted: Color, onSeek: (Long) -> Unit) {
+private fun SeekBar(progress: Progress, canSeek: Boolean, accent: Color, on: Color, muted: Color, onSeek: (Long) -> Unit, envelope: ByteArray? = null) {
     var dragging by remember { mutableStateOf<Float?>(null) }
     val fraction = dragging ?: progress.fraction
     val motion = ArnavTheme.motion
@@ -984,8 +1010,33 @@ private fun SeekBar(progress: Progress, canSeek: Boolean, accent: Color, on: Col
             contentAlignment = Alignment.CenterStart,
         ) {
             val h = lerpDp(4.dp, 8.dp, thumb)
-            Box(Modifier.fillMaxWidth().height(h).clip(RoundedCornerShape(4.dp)).background(on.copy(alpha = 0.16f)))
-            Box(Modifier.fillMaxWidth(fraction).height(h).clip(RoundedCornerShape(4.dp)).background(on))
+            if (envelope != null && envelope.size >= 8) {
+                // Wave: the song's measured loudness as slim bars; played part bright, the rest faint.
+                val grow = 1f + 0.25f * thumb
+                androidx.compose.foundation.Canvas(Modifier.fillMaxWidth().height(24.dp)) {
+                    val barW = 2.5.dp.toPx()
+                    val gap = 1.5.dp.toPx()
+                    val count = (size.width / (barW + gap)).toInt().coerceAtLeast(1)
+                    val minH = 3.dp.toPx()
+                    val maxH = size.height
+                    for (i in 0 until count) {
+                        val pos = i.toFloat() / count
+                        val idx = (pos * envelope.size).toInt().coerceIn(0, envelope.size - 1)
+                        val level = (envelope[idx].toInt() and 0xFF) / 255f
+                        val bh = ((minH + (maxH * 0.75f - minH) * level) * grow).coerceAtMost(maxH)
+                        val x = i * (barW + gap)
+                        drawRoundRect(
+                            color = if (pos <= fraction) on else on.copy(alpha = 0.22f),
+                            topLeft = Offset(x, (size.height - bh) / 2f),
+                            size = androidx.compose.ui.geometry.Size(barW, bh),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(barW / 2f, barW / 2f),
+                        )
+                    }
+                }
+            } else {
+                Box(Modifier.fillMaxWidth().height(h).clip(RoundedCornerShape(4.dp)).background(on.copy(alpha = 0.16f)))
+                Box(Modifier.fillMaxWidth(fraction).height(h).clip(RoundedCornerShape(4.dp)).background(on))
+            }
             Box(
                 Modifier.offset(x = maxWidth * fraction - 7.dp).size(14.dp).graphicsLayer { scaleX = 0.6f + 0.6f * thumb; scaleY = 0.6f + 0.6f * thumb; alpha = 0.4f + 0.6f * thumb }
                     .clip(androidx.compose.foundation.shape.CircleShape).background(accent),
@@ -997,6 +1048,15 @@ private fun SeekBar(progress: Progress, canSeek: Boolean, accent: Color, on: Col
             Text(if (progress.durationMs > 0) "-" + Formatters.duration(progress.durationMs - progress.positionMs) else "", style = ArnavTheme.type.numeric, color = muted)
         }
     }
+}
+
+/** The song's loudness envelope from on-device analysis (null until analyzed). */
+@Composable
+private fun rememberEnvelope(trackId: String): ByteArray? {
+    val dao = org.koin.compose.koinInject<com.arnav.music.core.db.ArnavDatabase>().audioFeatures()
+    val flow = remember(trackId) { dao.observe(trackId) }
+    val row by flow.collectAsState(initial = null)
+    return row?.takeIf { it.ok }?.envelope
 }
 
 private fun lerpDp(a: androidx.compose.ui.unit.Dp, b: androidx.compose.ui.unit.Dp, t: Float) = androidx.compose.ui.unit.lerp(a, b, t)
