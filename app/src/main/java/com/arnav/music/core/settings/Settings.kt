@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.serialization.Serializable
 
@@ -102,6 +103,10 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
     private inline fun <reified E : Enum<E>> Preferences.enum(key: Preferences.Key<String>, default: E): E =
         this[key]?.let { v -> enumValues<E>().firstOrNull { it.name == v } } ?: default
 
+    private val _loaded = kotlinx.coroutines.flow.MutableStateFlow(false)
+    /** False until DataStore has been read once — the splash screen waits on this. */
+    val loaded: StateFlow<Boolean> = _loaded
+
     val settings: StateFlow<AppSettings> = store.data
         .catch { emit(androidx.datastore.preferences.core.emptyPreferences()) }
         .map { p ->
@@ -139,6 +144,7 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
                 regionCode = p[K.region] ?: d.regionCode,
             )
         }
+        .onEach { _loaded.value = true }
         .stateIn(scope, SharingStarted.Eagerly, AppSettings())
 
     suspend fun update(transform: (AppSettings) -> AppSettings) {

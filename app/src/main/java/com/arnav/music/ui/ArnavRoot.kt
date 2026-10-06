@@ -130,7 +130,12 @@ fun ArnavAppRoot(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled: () ->
     val mode = surfaceMode(settings)
     val palette = rememberArtworkPalette(track?.artworkUrl, mode)
 
+    val loaded by vm.settingsLoaded.collectAsStateWithLifecycle()
     ArnavMusicTheme(settings, budget, palette) {
+        if (!loaded) {
+            Box(Modifier.fillMaxSize().background(ArnavTheme.colors.background))
+            return@ArnavMusicTheme
+        }
         if (!settings.onboardingDone) {
             OnboardingScreen(vm)
             return@ArnavMusicTheme
@@ -177,7 +182,7 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
     LaunchedEffect(deepLink) {
         when (val d = deepLink) {
             is DeepLink.Navigate -> navigator.go(d.route)
-            is DeepLink.PlayYouTube -> navigator.go(Routes.search(d.videoId))
+            is DeepLink.PlayYouTube -> vm.playVideo(d.videoId)
             null -> Unit
         }
         if (deepLink != null) onDeepLinkHandled()

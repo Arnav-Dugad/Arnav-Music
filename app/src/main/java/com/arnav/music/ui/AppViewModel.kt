@@ -38,8 +38,10 @@ class AppViewModel(
     private val auth: AuthRepository,
     private val analytics: Analytics,
     private val localSource: com.arnav.music.core.local.LocalMediaSource,
+    private val youtube: com.arnav.music.core.youtube.YouTubeRepository,
 ) : ViewModel() {
     val settings: StateFlow<AppSettings> = settingsRepo.settings
+    val settingsLoaded: StateFlow<Boolean> = settingsRepo.loaded
     val budget = perf.budget
     val playerState = player.state
     val progress = player.progress
@@ -57,6 +59,20 @@ class AppViewModel(
         if (tracks.isEmpty()) return
         player.playTracks(tracks, index, shuffle)
         analytics.log(Analytics.Event.PLAY_REQUESTED, mapOf("source" to tracks.getOrNull(index)?.source?.name.orEmpty()))
+    }
+
+    /** Opens a shared/deep-linked YouTube video in the player. */
+    fun playVideo(videoId: String) = viewModelScope.launch {
+        youtube.video(videoId)
+            .onSuccess { play(listOf(it)) }
+            .onFailure { e ->
+                message(when (e) {
+                    com.arnav.music.domain.provider.MusicError.MissingApiKey -> "Add a YouTube key in Settings → Sources to open YouTube links."
+                    com.arnav.music.domain.provider.MusicError.QuotaExhausted -> "Today's YouTube allowance is used up. Try again tomorrow."
+                    com.arnav.music.domain.provider.MusicError.Offline -> "You're offline."
+                    else -> "That video can't be played here."
+                })
+            }
     }
 
     fun playNext(track: Track) { player.playNext(listOf(track)); message("Playing next") }

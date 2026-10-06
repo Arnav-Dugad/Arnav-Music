@@ -98,7 +98,7 @@ val appModule = module {
     single { YouTubeEngine() }
     single { PlaybackController(androidContext(), get(), get(), get(), get(), get()) }
 
-    viewModel { AppViewModel(get(), get(), get(), get(), get(), get(), get(), get()) }
+    viewModel { AppViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     viewModel { AuthViewModel(get(), get()) }
     viewModel { HomeViewModel(get(), get(), get(), get()) }
     viewModel { ExploreViewModel(get(), get(), get(), get()) }

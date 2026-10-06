@@ -180,6 +180,17 @@ class YouTubeRepository(
 
     override suspend fun track(id: TrackId): Track? = trackDao.get(id.value)?.toDomain()
 
+    /** Resolves a single video id (deep links, shared links): Room first, else videos.list (1 unit). */
+    suspend fun video(videoId: String): Result<Track> {
+        trackDao.get(TrackId.youtube(videoId).value)?.let { return Result.success(it.toDomain()) }
+        if (quotaState() == QuotaState.EXHAUSTED) return Result.failure(MusicError.QuotaExhausted)
+        return runCatching {
+            val v = withRetry { api.videos(listOf(videoId)) }.items.firstOrNull { it.status.embeddable } ?: throw MusicError.Unavailable
+            usage.youtubeCall(YouTubeCosts.VIDEOS_LIST, false)
+            v.toTrack().also { trackDao.upsert(listOf(TrackEntity.from(it, clock.now()))) }
+        }
+    }
+
     private suspend fun <T> withRetry(block: suspend () -> T): T {
         var attempt = 0
         while (true) {

@@ -17,7 +17,10 @@ class MainActivity : ComponentActivity() {
     private val openPlayer = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        val splash = installSplashScreen()
+        // Hold the system splash until settings are read, so returning users never see onboarding flash.
+        val settings: com.arnav.music.core.settings.SettingsRepository = org.koin.android.ext.android.getKoin().get()
+        splash.setKeepOnScreenCondition { !settings.loaded.value }
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) handle(intent)
