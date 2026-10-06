@@ -26,7 +26,10 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import kotlin.coroutines.cancellation.CancellationException
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
@@ -38,7 +41,6 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -86,6 +88,7 @@ import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -102,6 +105,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalContext
@@ -115,6 +120,7 @@ import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -208,6 +214,10 @@ fun PlayerLayer(
     val wideVideo = isYouTube && !squareArt
     var immersive by rememberSaveable { mutableStateOf(false) }
     var queueOpen by rememberSaveable { mutableStateOf(false) }
+    // Queue sheet progress (0 = closed, 1 = open): follows the finger while dragged, springs otherwise.
+    val queueT = remember { Animatable(if (queueOpen) 1f else 0f) }
+    var queueDragging by remember { mutableStateOf(false) }
+    val queueVisible by remember { derivedStateOf { queueT.value > 0.001f } }
     var lyricsOpen by rememberSaveable { mutableStateOf(false) }
     val lyricsT by animateFloatAsState(if (lyricsOpen) 1f else 0f, motion.cinematic(), label = "lyrics")
     // Full-screen lyrics: chrome steps aside, only the lines over the blurred cover remain.
@@ -260,13 +270,52 @@ fun PlayerLayer(
         expand.animateTo(target, motion.cinematic())
     }
 
+    val queueSpec: AnimationSpec<Float> =
+        if (motion.reduced) motion.responsive() else spring(dampingRatio = 0.84f, stiffness = 420f, visibilityThreshold = 0.0005f)
+    /** Opens/closes the queue, carrying [velocity] (progress per second) from a release into the spring. */
+    fun settleQueue(open: Boolean, velocity: Float = 0f) {
+        queueDragging = false
+        queueOpen = open
+        scope.launch { queueT.animateTo(if (open) 1f else 0f, queueSpec, initialVelocity = velocity) }
+    }
+    // queueOpen can also change from outside a gesture (restored state); the sheet follows it.
+    LaunchedEffect(queueOpen) {
+        val target = if (queueOpen) 1f else 0f
+        if (!queueDragging && queueT.targetValue != target) queueT.animateTo(target, queueSpec)
+    }
+
+    // Double tap to seek (left half back, right half forward), YouTube style.
+    val seekTaps = rememberSeekTapState()
+    val progressNow by androidx.compose.runtime.rememberUpdatedState(progress)
+    val canSeekTap = settings.doubleTapSeek && state.capabilities.canSeek && progress.durationMs > 0 && !pip
+    fun seekStep(dir: Int, fx: Float, fy: Float) {
+        val p = progressNow
+        val target = seekTaps.step(dir, fx, fy, p.positionMs, p.durationMs)
+        haptics.select()
+        actions.seekTo(target)
+    }
+
+    // Particle cover changes (on-device covers): the old cover dissolves, the new one assembles.
+    val particlesOn = settings.coverParticles && !motion.reduced && !isYouTube && (ArnavTheme.budget?.particles ?: 1) > 0
+    val swapEnabled = particlesOn && settledOpen && !lyricsOpen && !pip
+    val queueIndex = state.queue.currentIndex
+    val lastQueueIndex = remember { intArrayOf(queueIndex) }
+    val swapForward = queueIndex >= lastQueueIndex[0]
+    androidx.compose.runtime.SideEffect { lastQueueIndex[0] = queueIndex }
+    val swap = rememberCoverSwap(track, enabled = swapEnabled, forward = swapForward, prefetch = particlesOn)
+
     // Predictive back: the player leans back with the gesture and collapses on release.
     PredictiveBackHandler(enabled = expand.targetValue > 0.5f && !pip) { events ->
         val collapsing = !queueOpen && !lyricsOpen && !immersive && !lyricsFull
+        val closingQueue = queueOpen
         try {
-            events.collect { ev -> if (collapsing) expand.snapTo(1f - 0.16f * ev.progress) }
+            events.collect { ev ->
+                if (collapsing) expand.snapTo(1f - 0.16f * ev.progress)
+                // The queue sheet sinks a little with the gesture and drops away on release.
+                else if (closingQueue) queueT.snapTo(1f - 0.12f * ev.progress)
+            }
             when {
-                queueOpen -> queueOpen = false
+                queueOpen -> settleQueue(false)
                 lyricsFull -> lyricsFull = false
                 lyricsOpen -> lyricsOpen = false
                 immersive -> immersive = false
@@ -274,6 +323,7 @@ fun PlayerLayer(
             }
         } catch (e: CancellationException) {
             if (collapsing) scope.launch { expand.animateTo(1f, motion.responsive()) }
+            if (closingQueue) scope.launch { queueT.animateTo(1f, queueSpec) }
             throw e
         }
     }
@@ -336,190 +386,323 @@ fun PlayerLayer(
         val lyricLeft = px(24f)
         val lyricTop = statusTop + px(66f)
 
-        // ---- Now Playing sheet (under the travelling surface) ----
-        if (e > 0.001f && !pip) {
-            val sheetShift = (1f - e) * (H - barTop)
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        translationY = sheetShift
-                        alpha = (e * 1.6f).coerceAtMost(1f)
-                    }
-                    .clip(RoundedCornerShape(topStart = 28.dp * (1 - e), topEnd = 28.dp * (1 - e)))
-                    .pointerInput(Unit) {
-                        val tracker = VelocityTracker()
-                        detectVerticalDragGestures(
-                            onDragStart = { tracker.resetTracking() },
-                            onDragEnd = {
-                                val v = tracker.calculateVelocity().y
-                                animateTo(if (v > 1200f || expand.value < 0.7f) 0f else 1f)
-                            },
-                            onDragCancel = { animateTo(1f) },
-                        ) { change, dy ->
-                            tracker.addPosition(change.uptimeMillis, change.position)
-                            if (dy < -18f && expand.value >= 0.99f && !queueOpen) { queueOpen = true; return@detectVerticalDragGestures }
-                            scope.launch { expand.snapTo((expand.value - dy / (H - barTop)).coerceIn(0f, 1f)) }
-                        }
-                    },
-            ) {
-                LivingBackdrop(
-                    palette, track.artworkUrl, track.id.value, settings.artworkMotion, settings.gyroParallax,
-                    intensity = if (immersive) 1.4f else 1f, pulse = { beat.value },
-                    artworkBlur = if (wide) 0f else lt,
-                )
-                NowPlayingContent(
-                    track = track, state = state, progress = progress, palette = palette, liked = liked,
-                    artSpace = with(density) { fullH.toDp() }, artTopPx = fullTop, wide = wide, immersive = immersive,
-                    onCollapse = { animateTo(0f) }, actions = actions, onQueue = { queueOpen = true },
-                    switchingVariant = switchingVariant,
-                    lyricsT = lt, lyricsOpen = lyricsOpen,
-                    lyricArtWidth = with(density) { (fullW * lyricScale).toDp() }, lyricArtHeight = with(density) { lyricArtH.toDp() },
-                    onLyrics = { lyricsOpen = !lyricsOpen; if (lyricsOpen) immersive = false },
-                    lyricsFull = lyricsFull, onToggleFull = { lyricsFull = !lyricsFull },
-                )
-            }
-        }
-
-        // ---- MorphBar ----
-        if (e < 0.999f && dockRect == null && !pip) {
-            val singing = com.arnav.music.ui.lyrics.nowSinging(track, progress, settings.miniPlayerLyrics)
-            MorphBar(
-                track = track, state = state, progress = progress, liked = liked, lyricLine = singing,
-                modifier = Modifier
-                    .offset { IntOffset(barLeft.roundToInt(), barTop.roundToInt()) }
-                    .requiredSize(with(density) { (barRight - barLeft).toDp() }, with(density) { barH.toDp() })
-                    .graphicsLayer { alpha = 1f - (e * 2.2f).coerceAtMost(1f); translationY = -e * px(40f) },
-                artWidthPx = miniArtW,
-                onExpand = { animateTo(1f) },
-                onDragExpand = { delta -> scope.launch { expand.snapTo((expand.value + delta / (H - barTop)).coerceIn(0f, 1f)) } },
-                onDragEnd = { v -> animateTo(if (v < -900f || expand.value > 0.25f) 1f else 0f) },
-                actions = actions,
-            )
-        }
-
-        // ---- The travelling surface: artwork (local) or the visible YouTube player ----
-        // When opened from a card, it starts at that card's artwork instead of the MorphBar.
-        val origin = launchOrigin
-        LaunchedEffect(origin, expand.isRunning, e) { if (origin != null && !expand.isRunning && (e >= 0.999f || e <= 0.001f)) onLaunchConsumed() }
-        val dock = dockRect
-        val startLeft = origin?.left ?: dock?.left ?: miniLeft
-        val startTop = origin?.top ?: dock?.top ?: miniTop
-        val startW = origin?.width?.takeIf { it > 1f } ?: dock?.width?.takeIf { it > 1f } ?: miniArtW
+        // ---- Queue sheet geometry ----
+        // The YouTube player is never covered: the sheet stops below the video on phones and sits
+        // beside it on wide screens. Geometry is taken with Now Playing fully receded.
         val openLeft = lerp(fullLeft, lyricLeft, lt)
         val openTop = lerp(fullTop, lyricTop, lt)
-        val left = if (pip) 0f else lerp(startLeft, openLeft, e)
-        val top = if (pip) 0f else lerp(startTop, openTop, e)
-        val surfW = if (pip) W else fullW
-        val surfH = if (pip) H else fullH
-        val scale = if (pip) 1f else lerp(startW / fullW, 1f, e) * lerp(1f, lyricScale, lt * e)
-        // Swipeable cover carousel once Now Playing has settled (on-device covers only).
-        val carousel = !isYouTube && !wide && !immersive && !pip && lt < 0.001f && e >= 0.999f && !expand.isRunning && state.queue.items.size > 1
-        val cornerFull = androidx.compose.ui.unit.lerp(22.dp, with(density) { (px(12f) / max(lyricScale, 0.05f)).toDp() }, lt)
-        val cornerMini = with(density) { (px(if (dock != null) 18f else 10f) / scale).toDp() }
-        val corner = if (pip) 0.dp else androidx.compose.ui.unit.lerp(cornerMini, cornerFull, e)
-        // A soft halo in the cover's colour behind the artwork; it swells a little on the beat.
-        val haloA = if (pip) 0f else e * (1f - lt) * (1f - lyricsFullT) * (if (immersive) 0.6f else 1f)
-        if (haloA > 0.01f) {
-            val haloColor = Color(palette.accent)
-            androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
-                val center = Offset(left + surfW * scale / 2f, top + surfH * scale / 2f)
-                val r = max(surfW, surfH) * scale * (0.78f + 0.05f * beat.value)
-                drawCircle(
-                    Brush.radialGradient(
-                        listOf(haloColor.copy(alpha = 0.34f * haloA), haloColor.copy(alpha = 0.1f * haloA), Color.Transparent),
-                        center = center, radius = r,
-                    ),
-                    radius = r, center = center,
-                )
-            }
+        val openScale = lerp(1f, lyricScale, lt)
+        val recedePivotX = W / 2f
+        val recedePivotY = H * RECEDE_PIVOT_Y
+        val queueBesideVideo = isYouTube && wide
+        // Settled lyrics state (not the animation), so the sheet's size doesn't change every frame.
+        val panelLt = if (wide || pip || !lyricsOpen) 0f else 1f
+        val queuePanelH = if (isYouTube && !wide) {
+            val videoBottom = lerp(fullTop, lyricTop, panelLt) + fullH * lerp(1f, lyricScale, panelLt)
+            val receded = recedePivotY + (videoBottom - recedePivotY) * (1f - RECEDE)
+            min(H * 0.78f, H - receded - px(12f)).coerceAtLeast(px(96f))
+        } else H * 0.78f
+        val queuePanelHNow by androidx.compose.runtime.rememberUpdatedState(queuePanelH)
+
+        fun queueDragBy(dy: Float) {
+            queueDragging = true
+            scope.launch { queueT.snapTo((queueT.value - dy / queuePanelHNow).coerceIn(0f, 1f)) }
         }
-        if (pip) Box(Modifier.fillMaxSize().background(Color.Black))
-        Box(
-            Modifier
-                .offset { IntOffset(left.roundToInt(), top.roundToInt()) }
-                .requiredSize(with(density) { surfW.toDp() }, with(density) { surfH.toDp() })
-                .graphicsLayer {
-                    transformOrigin = TransformOrigin(0f, 0f)
-                    // Breathing/settling scales around the cover's centre, only once Now Playing is open.
-                    val k = if (!isYouTube && !pip) 1f + (coverScale() - 1f) * e else 1f
-                    scaleX = scale * k; scaleY = scale * k
-                    translationX = size.width * scale * (1f - k) / 2f
-                    translationY = size.height * scale * (1f - k) / 2f
-                    alpha = if (carousel) 0f else if (!isYouTube) 1f - lyricsFullT else 1f
-                    shadowElevation = if (pip) 0f else max(e, if (dock != null) 0.5f else 0f) * 24.dp.toPx()
-                    shape = RoundedCornerShape(corner)
-                    clip = true
-                },
-        ) {
-            if (isYouTube) {
-                // One call site for the single persistent player (switching Song/Video must not recreate it).
-                // Cover-art uploads: the player stays visible and playing; only the empty side bars fall
-                // outside the square frame.
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    val sideDp = with(density) { surfH.toDp() }
-                    YouTubeSurface(youtube, if (squareArt) Modifier.requiredSize(sideDp * (16f / 9f), sideDp) else Modifier.fillMaxSize())
+        fun queueDragEnd(velocityY: Float) {
+            val wasOpen = queueOpen
+            val open = when {
+                velocityY < -900f -> true
+                velocityY > 900f -> false
+                else -> queueT.value > (if (wasOpen) 0.7f else 0.3f)
+            }
+            if (open && !wasOpen) haptics.navigate()
+            settleQueue(open, -velocityY / queuePanelHNow)
+        }
+        // Inside the list: a downward pull at its top drags the sheet; pushing back up raises it first.
+        val queuePull = remember {
+            object : NestedScrollConnection {
+                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                    if (source == NestedScrollSource.UserInput && queueDragging && available.y < 0f && queueT.value < 1f) {
+                        queueDragBy(available.y)
+                        return Offset(0f, available.y)
+                    }
+                    return Offset.Zero
                 }
-            } else {
-                TrackArtwork(
-                    track = track, index = state.queue.currentIndex,
-                    revealKey = state.queue.items.firstOrNull()?.uid,
-                    revealFromRight = e < 0.5f,
-                    modifier = Modifier.fillMaxSize()
-                        .pointerInput(track.id, lyricsOpen) {
-                            if (lyricsOpen) return@pointerInput
-                            // Swipe sideways to change song; pull down (like iOS) to close the player.
-                            var dx = 0f
-                            var dy = 0f
-                            var axis = 0
-                            var active = false
-                            val tracker = VelocityTracker()
-                            detectDragGestures(
-                                onDragStart = { dx = 0f; dy = 0f; axis = 0; active = expand.value >= 0.99f; tracker.resetTracking() },
-                                onDragEnd = {
-                                    if (active) when (axis) {
-                                        1 -> if (dx < -120f) actions.next() else if (dx > 120f) actions.previous()
-                                        2 -> animateTo(if (tracker.calculateVelocity().y > 1000f || expand.value < 0.75f) 0f else 1f)
-                                    }
-                                },
-                                onDragCancel = { if (active && axis == 2) animateTo(1f) },
-                            ) { change, drag ->
-                                if (!active) return@detectDragGestures
-                                tracker.addPosition(change.uptimeMillis, change.position)
-                                dx += drag.x; dy += drag.y
-                                if (axis == 0 && (abs(dx) > 18f || abs(dy) > 18f)) axis = if (abs(dx) > abs(dy)) 1 else 2
-                                if (axis == 2) {
-                                    change.consume()
-                                    scope.launch { expand.snapTo((expand.value - drag.y / (H - barTop)).coerceIn(0f, 1f)) }
-                                }
-                            }
-                        }
-                        .combinedClickable(
-                            onClick = { if (expand.value < 0.5f) animateTo(1f) else if (lyricsOpen) lyricsOpen = false else immersive = !immersive },
-                            onLongClick = { haptics.longPress(); actions.onMore(track) },
-                        )
-                        .semantics {
-                            contentDescription = "Artwork for ${track.title}"
-                            customActions = listOf(
-                                CustomAccessibilityAction("Next track") { actions.next(); true },
-                                CustomAccessibilityAction("Previous track") { actions.previous(); true },
-                                CustomAccessibilityAction(if (immersive) "Exit immersive" else "Immersive mode") { immersive = !immersive; true },
-                            )
-                        },
-                )
+
+                override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                    if (source == NestedScrollSource.UserInput && available.y > 0f && queueOpen) {
+                        queueDragBy(available.y)
+                        return Offset(0f, available.y)
+                    }
+                    return Offset.Zero
+                }
+
+                override suspend fun onPreFling(available: Velocity): Velocity {
+                    if (!queueDragging) return Velocity.Zero
+                    queueDragEnd(available.y)
+                    return available
+                }
+
+                override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                    if (queueDragging) queueDragEnd(0f)
+                    return Velocity.Zero
+                }
             }
         }
 
-        if (carousel) {
-            CoverCarousel(
-                state = state, topPx = fullTop, itemWidthPx = fullW, screenWidthPx = W,
-                onSettle = actions.skipTo,
-                onPullDown = { dy -> scope.launch { expand.snapTo((expand.value - dy / (H - barTop)).coerceIn(0f, 1f)) } },
-                currentScale = coverScale,
-                onPullEnd = { v -> animateTo(if (v > 1000f || expand.value < 0.75f) 0f else 1f) },
-                onTap = { immersive = !immersive },
-                onLongPress = { t -> haptics.longPress(); actions.onMore(t) },
-            )
+        // Everything under the queue recedes as one piece while the sheet rises (scale + the scrim's dim).
+        Box(
+            Modifier.fillMaxSize().graphicsLayer {
+                val q = if (e > 0.99f && !pip) queueT.value else 0f
+                val k = 1f - RECEDE * q
+                scaleX = k; scaleY = k
+                transformOrigin = TransformOrigin(0.5f, RECEDE_PIVOT_Y)
+            },
+        ) {
+            // ---- Now Playing sheet (under the travelling surface) ----
+            if (e > 0.001f && !pip) {
+                val sheetShift = (1f - e) * (H - barTop)
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            translationY = sheetShift
+                            alpha = (e * 1.6f).coerceAtMost(1f)
+                        }
+                        .clip(RoundedCornerShape(topStart = 28.dp * (1 - e), topEnd = 28.dp * (1 - e)))
+                        .pointerInput(Unit) {
+                            val tracker = VelocityTracker()
+                            // 0 = undecided, 1 = moving the player, 2 = pulling the queue up (finger-locked).
+                            var mode = 0
+                            detectVerticalDragGestures(
+                                onDragStart = { tracker.resetTracking(); mode = 0 },
+                                onDragEnd = {
+                                    val v = tracker.calculateVelocity().y
+                                    if (mode == 2) queueDragEnd(v) else animateTo(if (v > 1200f || expand.value < 0.7f) 0f else 1f)
+                                },
+                                onDragCancel = { if (mode == 2) queueDragEnd(0f) else animateTo(1f) },
+                            ) { change, dy ->
+                                tracker.addPosition(change.uptimeMillis, change.position)
+                                if (mode == 0) mode = if (dy < 0f && expand.value >= 0.99f && !queueOpen) 2 else 1
+                                if (mode == 2) { queueDragBy(dy); return@detectVerticalDragGestures }
+                                scope.launch { expand.snapTo((expand.value - dy / (H - barTop)).coerceIn(0f, 1f)) }
+                            }
+                        },
+                ) {
+                    LivingBackdrop(
+                        palette, track.artworkUrl, track.id.value, settings.artworkMotion, settings.gyroParallax,
+                        intensity = if (immersive) 1.4f else 1f, pulse = { beat.value },
+                        artworkBlur = if (wide) 0f else lt,
+                        movingGradient = settings.movingGradient && !isYouTube,
+                    )
+                    NowPlayingContent(
+                        track = track, state = state, progress = progress, palette = palette, liked = liked,
+                        artSpace = with(density) { fullH.toDp() }, artTopPx = fullTop, wide = wide, immersive = immersive,
+                        onCollapse = { animateTo(0f) }, actions = actions, onQueue = { settleQueue(true) },
+                        switchingVariant = switchingVariant,
+                        lyricsT = lt, lyricsOpen = lyricsOpen,
+                        lyricArtWidth = with(density) { (fullW * lyricScale).toDp() }, lyricArtHeight = with(density) { lyricArtH.toDp() },
+                        onLyrics = { lyricsOpen = !lyricsOpen; if (lyricsOpen) immersive = false },
+                        lyricsFull = lyricsFull, onToggleFull = { lyricsFull = !lyricsFull },
+                    )
+                }
+            }
+
+            // ---- MorphBar ----
+            if (e < 0.999f && dockRect == null && !pip) {
+                val singing = com.arnav.music.ui.lyrics.nowSinging(track, progress, settings.miniPlayerLyrics)
+                MorphBar(
+                    track = track, state = state, progress = progress, liked = liked, lyricLine = singing,
+                    modifier = Modifier
+                        .offset { IntOffset(barLeft.roundToInt(), barTop.roundToInt()) }
+                        .requiredSize(with(density) { (barRight - barLeft).toDp() }, with(density) { barH.toDp() })
+                        .graphicsLayer { alpha = 1f - (e * 2.2f).coerceAtMost(1f); translationY = -e * px(40f) },
+                    artWidthPx = miniArtW,
+                    onExpand = { animateTo(1f) },
+                    onDragExpand = { delta -> scope.launch { expand.snapTo((expand.value + delta / (H - barTop)).coerceIn(0f, 1f)) } },
+                    onDragEnd = { v -> animateTo(if (v < -900f || expand.value > 0.25f) 1f else 0f) },
+                    actions = actions,
+                )
+            }
+
+            // ---- The travelling surface: artwork (local) or the visible YouTube player ----
+            // When opened from a card, it starts at that card's artwork instead of the MorphBar.
+            val origin = launchOrigin
+            LaunchedEffect(origin, expand.isRunning, e) { if (origin != null && !expand.isRunning && (e >= 0.999f || e <= 0.001f)) onLaunchConsumed() }
+            val dock = dockRect
+            val startLeft = origin?.left ?: dock?.left ?: miniLeft
+            val startTop = origin?.top ?: dock?.top ?: miniTop
+            val startW = origin?.width?.takeIf { it > 1f } ?: dock?.width?.takeIf { it > 1f } ?: miniArtW
+            val left = if (pip) 0f else lerp(startLeft, openLeft, e)
+            val top = if (pip) 0f else lerp(startTop, openTop, e)
+            val surfW = if (pip) W else fullW
+            val surfH = if (pip) H else fullH
+            val scale = if (pip) 1f else lerp(startW / fullW, 1f, e) * lerp(1f, lyricScale, lt * e)
+            // Swipeable cover carousel once Now Playing has settled (on-device covers only).
+            val carousel = !isYouTube && !wide && !immersive && !pip && lt < 0.001f && e >= 0.999f && !expand.isRunning && state.queue.items.size > 1
+            val cornerFull = androidx.compose.ui.unit.lerp(22.dp, with(density) { (px(12f) / max(lyricScale, 0.05f)).toDp() }, lt)
+            val cornerMini = with(density) { (px(if (dock != null) 18f else 10f) / scale).toDp() }
+            val corner = if (pip) 0.dp else androidx.compose.ui.unit.lerp(cornerMini, cornerFull, e)
+            // Double tap to seek only on the fully open player (not the mini bar, lyrics corner or PiP).
+            val seekHere = canSeekTap && settledOpen && lt < 0.001f
+            // A soft halo in the cover's colour behind the artwork; it swells a little on the beat.
+            val haloA = if (pip) 0f else e * (1f - lt) * (1f - lyricsFullT) * (if (immersive) 0.6f else 1f)
+            if (haloA > 0.01f) {
+                val haloColor = Color(palette.accent)
+                androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                    val center = Offset(left + surfW * scale / 2f, top + surfH * scale / 2f)
+                    val r = max(surfW, surfH) * scale * (0.78f + 0.05f * beat.value)
+                    drawCircle(
+                        Brush.radialGradient(
+                            listOf(haloColor.copy(alpha = 0.34f * haloA), haloColor.copy(alpha = 0.1f * haloA), Color.Transparent),
+                            center = center, radius = r,
+                        ),
+                        radius = r, center = center,
+                    )
+                }
+            }
+            if (pip) Box(Modifier.fillMaxSize().background(Color.Black))
+            Box(
+                Modifier
+                    .offset { IntOffset(left.roundToInt(), top.roundToInt()) }
+                    .requiredSize(with(density) { surfW.toDp() }, with(density) { surfH.toDp() })
+                    .graphicsLayer {
+                        transformOrigin = TransformOrigin(0f, 0f)
+                        // Breathing/settling scales around the cover's centre, only once Now Playing is open.
+                        val k = if (!isYouTube && !pip) 1f + (coverScale() - 1f) * e else 1f
+                        scaleX = scale * k; scaleY = scale * k
+                        translationX = size.width * scale * (1f - k) / 2f
+                        translationY = size.height * scale * (1f - k) / 2f
+                        alpha = if (carousel) 0f else if (!isYouTube) 1f - lyricsFullT else 1f
+                        shadowElevation = if (pip) 0f else max(e, if (dock != null) 0.5f else 0f) * 24.dp.toPx()
+                        shape = RoundedCornerShape(corner)
+                        clip = true
+                    },
+            ) {
+                if (isYouTube) {
+                    // One call site for the single persistent player (switching Song/Video must not recreate it).
+                    // Cover-art uploads: the player stays visible and playing; only the empty side bars fall
+                    // outside the square frame. Double taps are only observed: every touch still reaches the player.
+                    Box(
+                        Modifier.fillMaxSize().observeDoubleTaps(seekHere, seekTaps) { d, fx, fy -> seekStep(d, fx, fy) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        val sideDp = with(density) { surfH.toDp() }
+                        YouTubeSurface(youtube, if (squareArt) Modifier.requiredSize(sideDp * (16f / 9f), sideDp) else Modifier.fillMaxSize())
+                    }
+                } else {
+                    TrackArtwork(
+                        track = track, index = state.queue.currentIndex,
+                        revealKey = state.queue.items.firstOrNull()?.uid,
+                        revealFromRight = e < 0.5f,
+                        swap = if (particlesOn) swap else null, swapEnabled = swapEnabled,
+                        modifier = Modifier.fillMaxSize()
+                            .pointerInput(track.id, lyricsOpen) {
+                                if (lyricsOpen) return@pointerInput
+                                // Swipe sideways to change song; pull down (like iOS) to close the player;
+                                // push up to bring the queue up under the finger.
+                                var dx = 0f
+                                var dy = 0f
+                                var axis = 0
+                                var active = false
+                                val tracker = VelocityTracker()
+                                detectDragGestures(
+                                    onDragStart = { dx = 0f; dy = 0f; axis = 0; active = expand.value >= 0.99f; tracker.resetTracking() },
+                                    onDragEnd = {
+                                        if (active) when (axis) {
+                                            1 -> if (dx < -120f) actions.next() else if (dx > 120f) actions.previous()
+                                            2 -> animateTo(if (tracker.calculateVelocity().y > 1000f || expand.value < 0.75f) 0f else 1f)
+                                            3 -> queueDragEnd(tracker.calculateVelocity().y)
+                                        }
+                                    },
+                                    onDragCancel = {
+                                        if (active && axis == 2) animateTo(1f)
+                                        if (active && axis == 3) queueDragEnd(0f)
+                                    },
+                                ) { change, drag ->
+                                    if (!active) return@detectDragGestures
+                                    tracker.addPosition(change.uptimeMillis, change.position)
+                                    dx += drag.x; dy += drag.y
+                                    if (axis == 0 && (abs(dx) > 18f || abs(dy) > 18f)) {
+                                        axis = if (abs(dx) > abs(dy)) 1 else if (dy < 0f && !queueOpen) 3 else 2
+                                    }
+                                    if (axis == 2) {
+                                        change.consume()
+                                        scope.launch { expand.snapTo((expand.value - drag.y / (H - barTop)).coerceIn(0f, 1f)) }
+                                    } else if (axis == 3) {
+                                        change.consume()
+                                        queueDragBy(drag.y)
+                                    }
+                                }
+                            }
+                            .coverTaps(
+                                seek = if (seekHere && !lyricsOpen) seekTaps else null,
+                                onTap = { if (expand.value < 0.5f) animateTo(1f) else if (lyricsOpen) lyricsOpen = false else immersive = !immersive },
+                                onLongPress = { haptics.longPress(); actions.onMore(track) },
+                                onSeek = { d, fx, fy -> seekStep(d, fx, fy) },
+                                longPressLabel = "More actions",
+                            )
+                            .semantics {
+                                contentDescription = "Artwork for ${track.title}"
+                                customActions = buildList {
+                                    add(CustomAccessibilityAction("Next track") { actions.next(); true })
+                                    add(CustomAccessibilityAction("Previous track") { actions.previous(); true })
+                                    add(CustomAccessibilityAction(if (immersive) "Exit immersive" else "Immersive mode") { immersive = !immersive; true })
+                                    if (canSeekTap) {
+                                        add(CustomAccessibilityAction("Back 5 seconds") { seekStep(-1, 0.25f, 0.5f); true })
+                                        add(CustomAccessibilityAction("Forward 5 seconds") { seekStep(1, 0.75f, 0.5f); true })
+                                    }
+                                }
+                            },
+                    )
+                }
+            }
+
+            // The YouTube seek feedback sits just under the video, never on it.
+            if (isYouTube && !pip && e > 0.99f) {
+                SeekChip(
+                    seekTaps,
+                    Modifier
+                        .offset { IntOffset(left.roundToInt(), (top + fullH * scale + px(8f)).roundToInt()) }
+                        .width(with(density) { (fullW * scale).toDp() }),
+                )
+            }
+
+            val pullMode = remember { intArrayOf(0) }
+            if (carousel) {
+                CoverCarousel(
+                    state = state, topPx = fullTop, itemWidthPx = fullW, screenWidthPx = W,
+                    // A swipe through the carousel already slid the new cover in: no particle swap for it.
+                    onSettle = { p -> swap.suppressNext(); actions.skipTo(p) },
+                    onPullDown = { dy ->
+                        if (pullMode[0] == 0) pullMode[0] = if (dy < 0f && !queueOpen) 2 else 1
+                        if (pullMode[0] == 2) queueDragBy(dy)
+                        else scope.launch { expand.snapTo((expand.value - dy / (H - barTop)).coerceIn(0f, 1f)) }
+                    },
+                    currentScale = coverScale,
+                    onPullEnd = { v ->
+                        val m = pullMode[0]
+                        pullMode[0] = 0
+                        if (m == 2) queueDragEnd(v) else animateTo(if (v > 1000f || expand.value < 0.75f) 0f else 1f)
+                    },
+                    onTap = { immersive = !immersive },
+                    onLongPress = { t -> haptics.longPress(); actions.onMore(t) },
+                    seek = if (seekHere) seekTaps else null,
+                    onSeek = { d, fx, fy -> seekStep(d, fx, fy) },
+                    swap = if (particlesOn) swap else null, swapEnabled = swapEnabled,
+                )
+            }
+
+            // ---- Particle cover change + double-tap feedback, laid exactly over the open cover ----
+            if (!isYouTube && !pip && e > 0.99f && lt < 0.001f) {
+                val coverMod = Modifier
+                    .offset { IntOffset(left.roundToInt(), top.roundToInt()) }
+                    .requiredSize(with(density) { (fullW * scale).toDp() }, with(density) { (fullH * scale).toDp() })
+                if (particlesOn && swap.busy(track, swapEnabled)) {
+                    CoverParticleLayer(swap, track, coverMod.graphicsLayer { val k = coverScale(); scaleX = k; scaleY = k })
+                }
+                SeekRipple(seekTaps, coverMod.graphicsLayer { val k = coverScale(); scaleX = k; scaleY = k }.clip(RoundedCornerShape(22.dp)))
+            }
         }
 
         // ---- Ambient (OLED idle): everything sinks to black except a hairline progress glow on the edge ----
@@ -529,24 +712,77 @@ fun PlayerLayer(
                 // Over lyrics the page only dims, so the words stay readable while the edge glows.
                 lyrics = lyricsOpen,
                 // Never draw over the YouTube player: it must stay fully visible.
-                keepClear = if (isYouTube) androidx.compose.ui.geometry.Rect(left, top, left + fullW * scale, top + fullH * scale) else null,
+                keepClear = if (isYouTube) androidx.compose.ui.geometry.Rect(openLeft, openTop, openLeft + fullW * openScale, openTop + fullH * openScale) else null,
                 onWake = { ambient = false; lastTouch = System.currentTimeMillis() },
             )
         }
 
         // ---- Queue panel ----
-        if (e > 0.99f && !pip) {
-            val q by animateFloatAsState(if (queueOpen) 1f else 0f, motion.responsive(), label = "queue")
-            if (q > 0.001f) {
-                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f * q)).clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) { queueOpen = false })
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .fillMaxHeight(0.78f)
-                        .align(Alignment.BottomCenter)
-                        .graphicsLayer { translationY = (1f - q) * size.height }
-                        .glass(GlassMaterial.Elevated, RoundedCornerShape(topStart = Radius.xl, topEnd = Radius.xl), tint = Color(palette.accent)),
-                ) { queueContent { queueOpen = false } }
+        if (e > 0.99f && !pip && queueVisible) {
+            // Scrim over the receded player. It dims everything except the YouTube video, and dragging on
+            // it moves the sheet just like dragging the sheet itself.
+            val videoRect = if (isYouTube) androidx.compose.ui.geometry.Rect(
+                openLeft, openTop,
+                openLeft + fullW * openScale, openTop + fullH * openScale,
+            ) else null
+            androidx.compose.foundation.Canvas(
+                Modifier.fillMaxSize()
+                    .pointerInput(Unit) {
+                        val tracker = VelocityTracker()
+                        detectVerticalDragGestures(
+                            onDragStart = { tracker.resetTracking() },
+                            onDragEnd = { queueDragEnd(tracker.calculateVelocity().y) },
+                            onDragCancel = { queueDragEnd(0f) },
+                        ) { change, dy ->
+                            tracker.addPosition(change.uptimeMillis, change.position)
+                            change.consume()
+                            queueDragBy(dy)
+                        }
+                    }
+                    .clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null, onClickLabel = "Close queue") { settleQueue(false) },
+            ) {
+                val q = queueT.value
+                val dim = Color.Black.copy(alpha = 0.45f * q)
+                val rect = videoRect
+                if (rect == null) {
+                    drawRect(dim)
+                } else {
+                    // The video recedes with everything else: keep exactly its current rect clear.
+                    val k = 1f - RECEDE * q
+                    val l = recedePivotX + (rect.left - recedePivotX) * k
+                    val t = recedePivotY + (rect.top - recedePivotY) * k
+                    val r = recedePivotX + (rect.right - recedePivotX) * k
+                    val b = recedePivotY + (rect.bottom - recedePivotY) * k
+                    drawRect(dim, topLeft = Offset.Zero, size = androidx.compose.ui.geometry.Size(size.width, t.coerceAtLeast(0f)))
+                    drawRect(dim, topLeft = Offset(0f, b), size = androidx.compose.ui.geometry.Size(size.width, (size.height - b).coerceAtLeast(0f)))
+                    drawRect(dim, topLeft = Offset(0f, t), size = androidx.compose.ui.geometry.Size(l.coerceAtLeast(0f), b - t))
+                    drawRect(dim, topLeft = Offset(r, t), size = androidx.compose.ui.geometry.Size((size.width - r).coerceAtLeast(0f), b - t))
+                }
+            }
+            Box(
+                Modifier
+                    .then(if (queueBesideVideo) Modifier.fillMaxWidth(0.5f) else Modifier.fillMaxWidth())
+                    .height(with(density) { queuePanelH.toDp() })
+                    .align(if (queueBesideVideo) Alignment.BottomEnd else Alignment.BottomCenter)
+                    .graphicsLayer { translationY = (1f - queueT.value) * size.height }
+                    .glass(GlassMaterial.Elevated, RoundedCornerShape(topStart = Radius.xl, topEnd = Radius.xl), tint = Color(palette.accent))
+                    // Grab the sheet anywhere outside the list (handle, title, chips) to drag it.
+                    .pointerInput(Unit) {
+                        val tracker = VelocityTracker()
+                        detectVerticalDragGestures(
+                            onDragStart = { tracker.resetTracking() },
+                            onDragEnd = { queueDragEnd(tracker.calculateVelocity().y) },
+                            onDragCancel = { queueDragEnd(0f) },
+                        ) { change, dy ->
+                            tracker.addPosition(change.uptimeMillis, change.position)
+                            change.consume()
+                            queueDragBy(dy)
+                        }
+                    },
+            ) {
+                CompositionLocalProvider(LocalQueuePull provides queuePull) {
+                    queueContent { settleQueue(false) }
+                }
             }
         }
     }
@@ -568,13 +804,25 @@ private fun CoverCarousel(
     onPullDown: (Float) -> Unit = {},
     onPullEnd: (Float) -> Unit = {},
     currentScale: () -> Float = { 1f },
+    /** Double tap to seek on the covers (null = off). */
+    seek: SeekTapState? = null,
+    onSeek: (dir: Int, fx: Float, fy: Float) -> Unit = { _, _, _ -> },
+    /** Particle cover change: the current cover stays hidden until its particles have assembled. */
+    swap: CoverSwap? = null,
+    swapEnabled: Boolean = false,
 ) {
     val density = LocalDensity.current
     val items = state.queue.items
     val current = state.queue.currentIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0))
     val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = current) { items.size }
     val latestCurrent by androidx.compose.runtime.rememberUpdatedState(current)
-    LaunchedEffect(current) { if (pager.currentPage != current && !pager.isScrollInProgress) pager.animateScrollToPage(current) }
+    val particleJump = swap != null && swapEnabled
+    LaunchedEffect(current) {
+        if (pager.currentPage != current && !pager.isScrollInProgress) {
+            // With particles the cover changes in place: jump straight to its page underneath them.
+            if (particleJump) pager.scrollToPage(current) else pager.animateScrollToPage(current)
+        }
+    }
     LaunchedEffect(pager) {
         androidx.compose.runtime.snapshotFlow { pager.settledPage }.collect { p -> if (p != latestCurrent && p in items.indices) onSettle(p) }
     }
@@ -600,16 +848,23 @@ private fun CoverCarousel(
         key = { items[it].uid },
     ) { page ->
         val t = items[page].track
+        val isCurrent = page == current
         Box(
             Modifier.fillMaxSize().graphicsLayer {
                 val d = kotlin.math.abs((pager.currentPage - page) + pager.currentPageOffsetFraction).coerceIn(0f, 1f)
                 val sc = (1f - 0.12f * d) * (1f + (currentScale() - 1f) * (1f - d))
                 scaleX = sc; scaleY = sc
-                alpha = 1f - 0.45f * d
+                alpha = (1f - 0.45f * d) * (if (isCurrent && swap != null) swap.alpha(t.id, swapEnabled) else 1f)
                 shadowElevation = (1f - d) * 24.dp.toPx()
                 shape = RoundedCornerShape(22.dp)
                 clip = true
-            }.combinedClickable(onClick = onTap, onLongClick = { onLongPress(t) })
+            }.coverTaps(
+                seek = if (isCurrent) seek else null,
+                onTap = onTap,
+                onLongPress = { onLongPress(t) },
+                onSeek = onSeek,
+                longPressLabel = "More actions",
+            )
                 .semantics { contentDescription = "Cover ${page + 1} of ${items.size}: ${t.title}" },
         ) {
             Artwork(t.artworkUrl, t.id.value, Modifier.fillMaxSize(), shape = androidx.compose.ui.graphics.RectangleShape, decodeSize = 900)
@@ -623,7 +878,16 @@ private fun CoverCarousel(
  */
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
-private fun TrackArtwork(track: Track, index: Int, modifier: Modifier, revealKey: Any? = null, revealFromRight: Boolean = false) {
+private fun TrackArtwork(
+    track: Track,
+    index: Int,
+    modifier: Modifier,
+    revealKey: Any? = null,
+    revealFromRight: Boolean = false,
+    /** Particle cover change: replaces the depth swap / spiral reveal while it is enabled. */
+    swap: CoverSwap? = null,
+    swapEnabled: Boolean = false,
+) {
     val motion = ArnavTheme.motion
     var lastIndex by remember { mutableStateOf(index) }
     val forward = index >= lastIndex
@@ -637,6 +901,8 @@ private fun TrackArtwork(track: Track, index: Int, modifier: Modifier, revealKey
         targetState = track,
         contentKey = { it.id },
         transitionSpec = {
+            // The particle swap draws the change itself; the covers just trade places underneath it.
+            if (swap != null && swapEnabled) return@AnimatedContent (EnterTransition.None togetherWith ExitTransition.None)
             if (spiralNow) return@AnimatedContent (fadeIn(tween(60)) togetherWith fadeOut(tween(520))).apply { targetContentZIndex = 1f }
             val dir = if (forward) 1 else -1
             val enter = slideInHorizontally(motion.offsetSpring()) { (it * 0.18f * dir * motion.travel).toInt() } +
@@ -658,6 +924,7 @@ private fun TrackArtwork(track: Track, index: Int, modifier: Modifier, revealKey
         Artwork(
             t.artworkUrl, t.id.value,
             Modifier.fillMaxSize().graphicsLayer {
+                if (swap != null) alpha = swap.alpha(t.id, swapEnabled)
                 if (canBlur && blur > 0.5f) {
                     val r = blur.dp.toPx()
                     renderEffect = BlurEffect(r, r, TileMode.Decal)
@@ -1235,6 +1502,9 @@ private fun SleepCountdown(sleep: com.arnav.music.core.playback.SleepTimer, colo
 }
 
 private const val AMBIENT_AFTER_MS = 8_000L
+/** How far Now Playing shrinks back as the queue rises over it, and the height it shrinks towards. */
+private const val RECEDE = 0.06f
+private const val RECEDE_PIVOT_Y = 0.42f
 
 /**
  * OLED ambient mode for an idle Now Playing screen: the page sinks to black and a hairline of light

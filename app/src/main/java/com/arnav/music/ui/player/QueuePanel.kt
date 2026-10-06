@@ -1,9 +1,12 @@
 package com.arnav.music.ui.player
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,10 +37,15 @@ import androidx.compose.material.icons.automirrored.rounded.ViewList
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -48,6 +56,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
@@ -69,10 +79,24 @@ import com.arnav.music.ui.theme.Radius
 import com.arnav.music.ui.theme.Space
 import java.text.DateFormat
 import java.util.Date
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.pow
+import kotlin.math.roundToInt
 
 /**
- * Up Next. Long-press-free reordering via the drag handle: the held row floats (scale + shadow)
- * while neighbours glide out of its way. "Journey" shows upcoming songs as a flowing timeline.
+ * Lets the panel's host pull the queue sheet down from inside the list: when the list is at its top,
+ * the leftover of a downward drag goes to this connection instead of the list's elastic overscroll.
+ */
+val LocalQueuePull = compositionLocalOf<NestedScrollConnection?> { null }
+
+/**
+ * Up Next. Long-press any row (or grab its handle) to reorder: the held row lifts (scale + shadow),
+ * neighbours spring out of its way, and the row is pulled magnetically towards the nearest slot,
+ * ticking as it crosses each one. The move is committed once, on release. "Journey" shows upcoming
+ * songs as a flowing timeline.
  */
 @Composable
 fun QueuePanel(
@@ -88,12 +112,92 @@ fun QueuePanel(
     val c = ArnavTheme.colors
     val haptics = ArnavTheme.haptics
     val motion = ArnavTheme.motion
+    val scope = rememberCoroutineScope()
     var journey by rememberSaveable { mutableStateOf(false) }
     val q = state.queue
     val latestQueue by rememberUpdatedState(q)
+    val move by rememberUpdatedState(onMove)
     val listState = rememberLazyListState()
-    var draggingUid by remember { mutableStateOf<Long?>(null) }
-    var dragOffset by remember { mutableFloatStateOf(0f) }
+    val pull = LocalQueuePull.current
+
+    // ---- Reorder state (indices are positions within Up Next) ----
+    var dragUid by remember { mutableStateOf<Long?>(null) }
+    var dragFrom by remember { mutableIntStateOf(-1) }
+    var dragTarget by remember { mutableIntStateOf(-1) }
+    var itemH by remember { mutableFloatStateOf(1f) }
+    // Waiting for the committed order to come back from the player.
+    var pending by remember { mutableStateOf(false) }
+    val dragVisual = remember { Animatable(0f) }
+    val drop = remember { DropMemo() }
+    // The committed order has arrived: this very frame shows the new layout with every offset at rest.
+    val arrived = pending && drop.items != null && q.items !== drop.items
+    val active = dragUid != null && !arrived
+
+    fun clear() {
+        dragUid = null; dragFrom = -1; dragTarget = -1; pending = false
+        drop.items = null
+        scope.launch { dragVisual.snapTo(0f) }
+    }
+    if (arrived) {
+        SideEffect {
+            // Keep the viewport where it was (by index, not by the moved rows' keys).
+            drop.anchor?.let { (index, offset) -> listState.requestScrollToItem(index, offset) }
+            drop.anchor = null
+        }
+        LaunchedEffect(Unit) { clear() }
+    }
+
+    fun startDrag(uid: Long) {
+        if (dragUid != null) return
+        val up = latestQueue.upNext
+        val from = up.indexOfFirst { it.uid == uid }
+        if (from < 0) return
+        itemH = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == uid }?.size?.toFloat()?.coerceAtLeast(1f) ?: return
+        dragUid = uid; dragFrom = from; dragTarget = from
+        drop.raw = 0f
+        scope.launch { dragVisual.snapTo(0f) }
+        haptics.longPress()
+    }
+
+    fun dragBy(dy: Float) {
+        if (dragUid == null || pending) return
+        drop.raw += dy
+        val raw = drop.raw
+        val last = latestQueue.upNext.lastIndex
+        val target = (dragFrom + (raw / itemH).roundToInt()).coerceIn(0, max(last, 0))
+        if (target != dragTarget) { dragTarget = target; haptics.snap() }
+        // Magnetism: close to a slot the row is drawn into it; halfway between, it follows the finger.
+        val slot = (target - dragFrom) * itemH
+        val d = ((raw - slot) / itemH).coerceIn(-0.5f, 0.5f)
+        val pullIn = 0.6f * (1f - abs(d) * 2f).pow(1.5f)
+        val goal = raw + (slot - raw) * pullIn
+        scope.launch {
+            if (motion.reduced) dragVisual.snapTo(goal)
+            else dragVisual.animateTo(goal, spring(dampingRatio = 0.8f, stiffness = 1400f))
+        }
+    }
+
+    fun endDrag(uid: Long) {
+        if (dragUid != uid || pending) return
+        val from = dragFrom
+        val to = dragTarget
+        pending = true
+        scope.launch {
+            // Settle into the slot with a little spring, then commit the move once.
+            dragVisual.animateTo((to - from) * itemH, if (motion.reduced) snap() else spring(dampingRatio = 0.68f, stiffness = 520f))
+            haptics.queued()
+            val qs = latestQueue
+            val cur = qs.items.indexOfFirst { it.uid == uid }
+            if (to == from || cur < 0) { clear(); return@launch }
+            val absTo = (qs.currentIndex + 1 + to).coerceIn(qs.currentIndex + 1, qs.items.lastIndex)
+            drop.items = qs.items
+            drop.anchor = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+            move(cur, absTo)
+            // Safety net: if the new order never shows up (the queue changed meanwhile), let go anyway.
+            delay(800)
+            if (dragUid == uid && pending) clear()
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxWidth().padding(top = Space.s), contentAlignment = Alignment.Center) {
@@ -120,7 +224,11 @@ fun QueuePanel(
             return@Column
         }
         val bounce = com.arnav.music.ui.components.rememberBounce()
-        LazyColumn(state = listState, contentPadding = PaddingValues(bottom = Space.xxxl), modifier = Modifier.weight(1f).bounce(bounce)) {
+        LazyColumn(
+            state = listState, contentPadding = PaddingValues(bottom = Space.xxxl),
+            // The pull connection sits inside the bounce so it sees the list's leftovers first.
+            modifier = Modifier.weight(1f).bounce(bounce).then(if (pull != null) Modifier.nestedScroll(pull) else Modifier),
+        ) {
             if (journey) {
                 val start = System.currentTimeMillis() + ((q.current?.track?.durationMs ?: 0L) / 2)
                 val etas = q.upNext.runningFold(start) { acc, it -> acc + (it.track.durationMs ?: 210_000L) }
@@ -130,18 +238,48 @@ fun QueuePanel(
             } else {
                 itemsIndexed(q.upNext, key = { _, it -> it.uid }) { i, item ->
                     val absolute = q.currentIndex + 1 + i
-                    val dragging = draggingUid == item.uid
+                    val dragging = active && dragUid == item.uid
                     val lift by animateFloatAsState(if (dragging) 1f else 0f, motion.responsive(), label = "lift")
+                    // Neighbours between the lifted row's home and its target slide one slot out of its way.
+                    val shiftTarget = when {
+                        !active || dragging -> 0f
+                        dragFrom < dragTarget && i in (dragFrom + 1)..dragTarget -> -itemH
+                        dragTarget < dragFrom && i in dragTarget until dragFrom -> itemH
+                        else -> 0f
+                    }
+                    val shift by animateFloatAsState(
+                        shiftTarget,
+                        if (active && !motion.reduced) spring(dampingRatio = 0.78f, stiffness = 420f) else snap(),
+                        label = "shift",
+                    )
                     Row(
                         Modifier
-                            .then(if (dragging) Modifier else Modifier.animateItem(placementSpec = spring(dampingRatio = 0.8f, stiffness = 280f, visibilityThreshold = IntOffset(1, 1))))
-                            .zIndex(if (dragging) 1f else 0f)
+                            .animateItem(
+                                placementSpec = if (dragUid != null || arrived) null
+                                else spring(dampingRatio = 0.8f, stiffness = 280f, visibilityThreshold = IntOffset(1, 1)),
+                            )
+                            .zIndex(if (dragging || lift > 0.01f) 1f else 0f)
                             .graphicsLayer {
-                                translationY = if (dragging) dragOffset else 0f
-                                scaleX = 1f + 0.03f * lift; scaleY = 1f + 0.03f * lift
+                                translationY = when {
+                                    dragging -> dragVisual.value
+                                    active -> shift
+                                    else -> 0f
+                                }
+                                val s = 1f + 0.04f * lift
+                                scaleX = s; scaleY = s
                                 shadowElevation = 16.dp.toPx() * lift
+                                shape = RoundedCornerShape(Radius.m)
                             }
-                            .background(c.surfaceRaised.copy(alpha = lift))
+                            .background(c.surfaceRaised.copy(alpha = lift), RoundedCornerShape(Radius.m))
+                            .pointerInput(item.uid) {
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = { startDrag(item.uid) },
+                                    onDragEnd = { endDrag(item.uid) },
+                                    onDragCancel = { endDrag(item.uid) },
+                                ) { change, amount ->
+                                    if (dragUid == item.uid) { change.consume(); dragBy(amount.y) }
+                                }
+                            }
                             .semantics {
                                 customActions = listOf(
                                     CustomAccessibilityAction("Move up") { if (absolute > q.currentIndex + 1) onMove(absolute, absolute - 1); true },
@@ -160,20 +298,13 @@ fun QueuePanel(
                                 .size(Space.touch)
                                 .padding(12.dp)
                                 .pointerInput(item.uid) {
+                                    // The handle lifts the row straight away (no long press needed).
                                     detectVerticalDragGestures(
-                                        onDragStart = { draggingUid = item.uid; dragOffset = 0f; haptics.longPress() },
-                                        onDragEnd = { draggingUid = null; dragOffset = 0f; haptics.queued() },
-                                        onDragCancel = { draggingUid = null; dragOffset = 0f },
+                                        onDragStart = { startDrag(item.uid) },
+                                        onDragEnd = { endDrag(item.uid) },
+                                        onDragCancel = { endDrag(item.uid) },
                                     ) { change, dy ->
-                                        change.consume()
-                                        dragOffset += dy
-                                        val cur = latestQueue.items.indexOfFirst { it.uid == item.uid }
-                                        val h = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == item.uid }?.size?.toFloat() ?: return@detectVerticalDragGestures
-                                        if (dragOffset > h * 0.55f && cur < latestQueue.items.lastIndex) {
-                                            onMove(cur, cur + 1); dragOffset -= h; haptics.snap()
-                                        } else if (dragOffset < -h * 0.55f && cur > latestQueue.currentIndex + 1) {
-                                            onMove(cur, cur - 1); dragOffset += h; haptics.snap()
-                                        }
+                                        if (dragUid == item.uid) { change.consume(); dragBy(dy) }
                                     }
                                 },
                         )
@@ -182,6 +313,13 @@ fun QueuePanel(
             }
         }
     }
+}
+
+/** Plain (non-observable) bookkeeping for a drop in flight. */
+private class DropMemo {
+    var raw = 0f
+    var items: List<QueueItem>? = null
+    var anchor: Pair<Int, Int>? = null
 }
 
 @Composable

@@ -52,6 +52,8 @@ fun LivingBackdrop(
     pulse: () -> Float = { 0f },
     /** 0..1: the cover itself, heavily blurred across the whole screen (lyrics mode). */
     artworkBlur: Float = 0f,
+    /** On-device covers: the palette becomes a slowly drifting mesh gradient (see [MovingGradient]). */
+    movingGradient: Boolean = false,
 ) {
     val budget = ArnavTheme.budget
     val colors = ArnavTheme.colors
@@ -63,15 +65,20 @@ fun LivingBackdrop(
     val alive = budget?.livingArtwork == true && artworkMotion != ArtworkMotion.OFF && !motion.reduced
     val speed = if (artworkMotion == ArtworkMotion.DYNAMIC) 1f else 0.55f
 
-    val t = if (alive) {
+    // The mesh gradient has its own (draw-only) clock; the classic drift runs only without it.
+    val t = if (alive && !movingGradient) {
         val inf = rememberInfiniteTransition(label = "living")
         inf.animateFloat(0f, (2 * Math.PI).toFloat(), infiniteRepeatable(tween((26_000 / speed).toInt(), easing = LinearEasing), RepeatMode.Restart), label = "t").value
     } else 0f
 
     val tilt = rememberTilt(enabled = alive && gyro)
+    // The mesh keeps drifting unless motion is reduced or the device is saving power / cooling down.
+    val meshAlive = !motion.reduced && budget?.powerSave != true && budget?.thermalThrottled != true
 
     Box(modifier.fillMaxSize()) {
-        Canvas(Modifier.fillMaxSize()) {
+        if (movingGradient) {
+            MovingGradient(palette, oled = colors.isOled, animate = meshAlive, modifier = Modifier.fillMaxSize(), intensity = intensity, pulse = pulse, tilt = tilt)
+        } else Canvas(Modifier.fillMaxSize()) {
             drawRect(Brush.verticalGradient(listOf(base, second)))
             val w = size.width; val h = size.height
             val px = tilt.first * 24.dp.toPx(); val py = tilt.second * 24.dp.toPx()
@@ -90,7 +97,7 @@ fun LivingBackdrop(
             )
         }
         // Real blur of the cover where the platform supports it cheaply (API 31+ RenderEffect).
-        if (budget?.realBlur == true && Build.VERSION.SDK_INT >= 31 && !colors.isOled) {
+        if (!movingGradient && budget?.realBlur == true && Build.VERSION.SDK_INT >= 31 && !colors.isOled) {
             Artwork(
                 artworkUrl, seed,
                 Modifier.fillMaxSize().graphicsLayer { alpha = 0.35f * intensity; scaleX = 1.3f; scaleY = 1.3f }.blur(80.dp),
