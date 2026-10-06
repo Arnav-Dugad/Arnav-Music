@@ -268,12 +268,13 @@ private fun TimeMachineCard(section: HomeSection.TimeMachine, onPlay: () -> Unit
 @Composable
 private fun SearchBar(onClick: () -> Unit) {
     val c = ArnavTheme.colors
+    val haptics = ArnavTheme.haptics
     val interaction = rememberInteraction()
     Row(
         Modifier.padding(horizontal = Space.gutter, vertical = Space.m).fillMaxWidth().height(52.dp)
             .pressScale(interaction, 0.98f)
             .glass(GlassMaterial.Thin, CircleShape)
-            .clickable(interaction, indication = null, role = Role.Button, onClickLabel = "Search", onClick = onClick)
+            .clickable(interaction, indication = null, role = Role.Button, onClickLabel = "Search") { haptics.press(); onClick() }
             .padding(horizontal = Space.l),
         verticalAlignment = Alignment.CenterVertically,
     ) {
