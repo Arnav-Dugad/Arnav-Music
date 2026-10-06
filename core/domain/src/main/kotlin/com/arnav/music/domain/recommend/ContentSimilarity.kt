@@ -24,8 +24,8 @@ data class ContentFeatures(
     val decade: Int? get() = year?.let { it / 10 * 10 }
 
     companion object {
-        fun of(track: Track, traits: AudioTraits? = null): ContentFeatures = ContentFeatures(
-            artistKey = track.artistKey,
+        fun of(track: Track, traits: AudioTraits? = null, artistKey: String = track.artistKey): ContentFeatures = ContentFeatures(
+            artistKey = artistKey,
             genres = track.genres.map { it.lowercase().trim() }.filter { it.isNotEmpty() }.toSet(),
             year = track.year?.takeIf { it in 1900..2100 },
             energy = traits?.energy?.takeIf { it.isFinite() } ?: track.energy,

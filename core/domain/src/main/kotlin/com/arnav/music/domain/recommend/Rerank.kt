@@ -26,9 +26,14 @@ object Reranker {
      * Keeps one version per song: the one the listener has played most, else the [prefer]red upload
      * type, else unknown type, else the other; the group keeps its best score.
      */
-    fun dedupe(items: List<Recommendation>, prefer: MediaVariant?, plays: (TrackId) -> Int = { 0 }): List<Recommendation> {
+    fun dedupe(
+        items: List<Recommendation>,
+        prefer: MediaVariant?,
+        plays: (TrackId) -> Int = { 0 },
+        keyOf: (Track) -> String = ::songKey,
+    ): List<Recommendation> {
         val groups = LinkedHashMap<String, MutableList<Recommendation>>()
-        for (r in items) groups.getOrPut(songKey(r.track)) { ArrayList() } += r
+        for (r in items) groups.getOrPut(keyOf(r.track)) { ArrayList() } += r
         return groups.values.map { g ->
             if (g.size == 1) return@map g[0]
             val best = g.maxByOrNull { it.score }!!
@@ -61,17 +66,19 @@ object Reranker {
         energyOf: (Track) -> Double? = { it.energy?.toDouble() },
         transition: ((Track, Track) -> Double)? = null,
         shortlist: Int = 250,
+        artistOf: (Track) -> String = { it.artistKey },
     ): List<Recommendation> {
         if (items.isEmpty() || limit <= 0) return emptyList()
         val pool = items.sortedWith(compareByDescending<Recommendation> { it.score }.thenBy { it.track.id.value })
             .take(shortlist).toMutableList()
+        val artists = pool.map { artistOf(it.track) }.toMutableList()
         val hi = pool.first().score
         val lo = pool.last().score
         val span = (hi - lo).takeIf { it > 1e-9 } ?: 1.0
         val picked = ArrayList<Recommendation>()
         val perArtist = HashMap<String, Int>()
         val recent = ArrayDeque<String>()
-        for (t in history.takeLast(maxOf(0, artistGap - 1))) recent.addLast(t.artistKey)
+        for (t in history.takeLast(maxOf(0, artistGap - 1))) recent.addLast(artistOf(t))
         val maxSim = DoubleArray(pool.size)
         var prev: Track? = history.lastOrNull()
         while (picked.size < limit && pool.isNotEmpty()) {
@@ -80,7 +87,7 @@ object Reranker {
             var bestV = Double.NEGATIVE_INFINITY
             for (i in pool.indices) {
                 val r = pool[i]
-                val a = r.track.artistKey
+                val a = artists[i]
                 if (artistGap > 1 && a in recent) continue
                 if ((perArtist[a] ?: 0) >= maxPerArtist) continue
                 var v = lambda * (r.score - lo) / span - (1 - lambda) * maxSim[i]
@@ -91,12 +98,13 @@ object Reranker {
             }
             if (bestI < 0) break
             val chosen = pool.removeAt(bestI)
+            val chosenArtist = artists.removeAt(bestI)
             // Keep maxSim aligned with the shrunken pool.
             for (i in bestI until pool.size) maxSim[i] = maxSim[i + 1]
             picked += chosen
-            perArtist.merge(chosen.track.artistKey, 1, Int::plus)
+            perArtist.merge(chosenArtist, 1, Int::plus)
             if (artistGap > 1) {
-                recent.addLast(chosen.track.artistKey)
+                recent.addLast(chosenArtist)
                 while (recent.size > artistGap - 1) recent.removeFirst()
             }
             prev = chosen.track

@@ -35,10 +35,12 @@ object SpectralEmbedding {
         val vals = Array(items.size) { DoubleArray(0) }
         for ((i, a) in items.withIndex()) {
             val c = ArrayList<Int>(); val v = ArrayList<Double>()
-            for (b in co.row(a).keys) {
-                val j = pos[b] ?: continue
-                val w = 0.5 * (co.ppmi(a, b) + co.ppmi(b, a))
-                if (w > 0) { c += j; v += w }
+            co.forEachNeighbour(a) { b, _ ->
+                val j = pos[b]
+                if (j != null) {
+                    val w = 0.5 * (co.ppmi(a, b) + co.ppmi(b, a))
+                    if (w > 0) { c += j; v += w }
+                }
             }
             cols[i] = c.toIntArray(); vals[i] = v.toDoubleArray()
         }

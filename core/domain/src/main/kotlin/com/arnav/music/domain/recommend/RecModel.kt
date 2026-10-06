@@ -59,19 +59,28 @@ class RecModel private constructor(
     val openSession: ListeningSession?,
     /** The most recent session, open or not. */
     val lastSession: ListeningSession?,
+    val artistKeys: ArtistKeyCache,
 ) {
     val context: ListeningContext = ListeningContext.at(now, input.zone)
     private val featureCache = HashMap<TrackId, ContentFeatures>()
+    private val names = HashMap<String, String>()
 
     val eventsByTrack: Map<TrackId, List<PlayEvent>> by lazy { input.events.groupBy { it.trackId } }
 
-    fun features(t: Track): ContentFeatures = featureCache.getOrPut(t.id) { ContentFeatures.of(t, input.traits[t.id]) }
+    fun features(t: Track): ContentFeatures = featureCache.getOrPut(t.id) {
+        val key = artistKeys.of(t.artist)
+        names.putIfAbsent(key, t.artist)
+        ContentFeatures.of(t, input.traits[t.id], key)
+    }
+
+    /** [Track.artistKey], memoised. */
+    fun artistKey(t: Track): String = features(t).artistKey
 
     fun similarity(a: Track, b: Track): Double = ContentSimilarity.similarity(features(a), features(b)).score
 
     fun track(id: TrackId): Track? = input.tracks[id]
 
-    fun artistName(key: String): String = taste.artistNames[key] ?: key
+    fun artistName(key: String): String = taste.artistNames[key] ?: names[key] ?: key
 
     /**
      * Seeds from the current session (or the last one, at lower weight, when it ended in the past
@@ -103,7 +112,8 @@ class RecModel private constructor(
             val sorted = if ((1 until ev.size).all { ev[it - 1].startedAt <= ev[it].startedAt }) ev else ev.sortedBy { it.startedAt }
             val sortedInput = if (sorted === input.events) input else input.copy(events = sorted)
             val open = index.update(sorted, now)
-            val taste = TasteModelBuilder.build(sortedInput, now)
+            val keys = ArtistKeyCache()
+            val taste = TasteModelBuilder.build(sortedInput, now, keys)
             val last = open ?: sorted.lastOrNull()?.let { lastEvent ->
                 // Re-derive the last closed session from the tail of history (cheap: walk back to a gap).
                 var i = sorted.lastIndex
@@ -111,7 +121,7 @@ class RecModel private constructor(
                 while (i > 0 && start - (sorted[i - 1].startedAt + sorted[i - 1].listenedMs) <= Sessionizer.GAP_MS) { i--; start = sorted[i].startedAt }
                 ListeningSession(sorted.subList(i, sorted.size).toList())
             }
-            return RecModel(sortedInput, now, taste, index, open, last)
+            return RecModel(sortedInput, now, taste, index, open, last, keys)
         }
     }
 }

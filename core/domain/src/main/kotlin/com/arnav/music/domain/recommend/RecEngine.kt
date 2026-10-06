@@ -25,16 +25,27 @@ class RecEngine(
     pool: Collection<Track>,
     private val multipliers: Map<RecSource, Double> = emptyMap(),
     private val prefer: MediaVariant? = MediaVariant.SONG,
+    /** Share one across refreshes: the single/compilation check is regex-heavy. */
+    private val singles: SinglesCache = SinglesCache(),
 ) {
     private val taste = model.taste
     private val feedback = model.input.feedback
 
+    private fun artistOf(t: Track): String = model.artistKey(t)
+
     /** Eligible candidates by id: the pool plus every known track, singles only, nothing rejected. */
     val candidates: Map<TrackId, Track> = LinkedHashMap<TrackId, Track>().also { m ->
-        for (t in pool) if (Reranker.eligible(t, feedback)) m.putIfAbsent(t.id, t)
-        for (t in model.input.tracks.values) if (Reranker.eligible(t, feedback)) m.putIfAbsent(t.id, t)
+        fun offer(t: Track) {
+            if (m.containsKey(t.id)) return
+            if (feedback.allows(t.id, artistOf(t)) && singles.isSingle(t)) m[t.id] = t
+        }
+        for (t in pool) offer(t)
+        for (t in model.input.tracks.values) offer(t)
     }
 
+    private val byArtist: Map<String, List<Track>> by lazy { candidates.values.groupBy { artistOf(it) } }
+    private val unplayed: List<Track> by lazy { candidates.values.filter { !taste.played(it.id) && it.id !in taste.likes } }
+    private val songKeys = HashMap<TrackId, String>()
     private val graph: WalkGraph by lazy { buildGraph() }
     private val inUserPlaylist: Set<TrackId> by lazy { taste.playlistsOf.filterValues { l -> l.isNotEmpty() }.keys }
 
@@ -72,13 +83,13 @@ class RecEngine(
             recencyHours = 2.0, exclude = setOf(seed.id),
             seedGenres = model.features(seed).genres,
         )
-        val seeds = Seeds(taste = listOf(seed.id to 1.0) + second, content = listOf(seed), artists = mapOf(seed.artistKey to 1.0))
+        val seeds = Seeds(taste = listOf(seed.id to 1.0) + second, content = listOf(seed), artists = mapOf(artistOf(seed) to 1.0))
         return finish(score(seeds, plan), limit, artistGap = 3, maxPerArtist = 3, history = listOf(seed))
     }
 
     /** Radio from an artist: their best-loved songs anchor it, related artists fill it out. */
     fun artistRadio(artistKey: String, limit: Int = 25): List<Recommendation> {
-        val own = candidates.values.filter { it.artistKey == artistKey }
+        val own = byArtist[artistKey].orEmpty()
             .sortedWith(compareByDescending<Track> { taste.trackLongNorm(it.id) }.thenBy { it.id.value })
         val anchors = own.take(5)
         val plan = Plan(
@@ -104,7 +115,7 @@ class RecEngine(
             familiarity = 0.55, tasteWeight = 0.8, energyTarget = lastEnergy, recencyHours = 3.0,
             exclude = exclude + recent.map { it.id }, useContext = true, useCold = true,
         )
-        val scored = score(Seeds(session = seeds, content = tail.take(3), artists = tail.associate { it.artistKey to 0.4 }), plan)
+        val scored = score(Seeds(session = seeds, content = tail.take(3), artists = tail.associate { artistOf(it) to 0.4 }), plan)
         val arc = EnergyArc.radio(lastEnergy, limit)
         return finish(
             scored, limit, artistGap = 3, maxPerArtist = 2, history = recent,
@@ -143,7 +154,7 @@ class RecEngine(
             if (!loved) continue
             val long = taste.trackLongNorm(id)
             val score = (0.3 + long) * (1 - taste.trackShortNorm(id)) * minOf(1.0, days / 90.0) +
-                (if (id in taste.likes) 0.25 else 0.0) - 0.4 * taste.artistEarlySkipRate.getOrDefault(t.artistKey, 0.0)
+                (if (id in taste.likes) 0.25 else 0.0) - 0.4 * taste.artistEarlySkipRate.getOrDefault(artistOf(t), 0.0)
             val peak = model.peakMonth(id)
             val why = Explain.rediscover(peak?.second ?: 0, peak?.first, taste.likes[id], now, model.input.zone)
             out += Recommendation(t, score, RecSource.REDISCOVER, why)
@@ -175,7 +186,7 @@ class RecEngine(
         for (cluster in clusters) {
             val core = cluster.sortedWith(compareByDescending<TrackId> { taste.trackLongNorm(it) }.thenBy { it.value })
             val artistWeight = HashMap<String, Double>()
-            for (id in core) candidates[id]?.let { artistWeight.merge(it.artistKey, 0.2 + taste.trackLongNorm(id), Double::plus) }
+            for (id in core) candidates[id]?.let { artistWeight.merge(artistOf(it), 0.2 + taste.trackLongNorm(id), Double::plus) }
             val topArtists = artistWeight.entries.sortedWith(compareByDescending<Map.Entry<String, Double>> { it.value }.thenBy { it.key }).map { it.key }
             val names = topArtists.take(3).map { model.artistName(it) }
             val coreTracks = core.filter { it !in used }.mapNotNull { candidates[it] }
@@ -280,7 +291,7 @@ class RecEngine(
         if (plan.base.containsKey(RecSource.SESSION)) neighbours(RecSource.SESSION, seeds.session)
         if (plan.base.containsKey(RecSource.COOCCURRENCE)) neighbours(RecSource.COOCCURRENCE, seeds.taste)
 
-        // Personalised PageRank on the heterogeneous graph.
+        // Personalised PageRank on the heterogeneous graph (the strongest few hundred tracks).
         if (plan.base.containsKey(RecSource.GRAPH)) {
             val restart = HashMap<String, Double>()
             for ((id, w) in seeds.session) restart.merge(WalkGraph.track(id.value), 0.35 * w, Double::plus)
@@ -288,10 +299,14 @@ class RecEngine(
             for ((a, w) in seeds.artists) restart.merge(WalkGraph.artist(a), 0.2 * w, Double::plus)
             for (g in plan.seedGenres) restart.merge(WalkGraph.genre(g), 0.1, Double::plus)
             if (restart.isNotEmpty()) {
-                val rank = graph.personalizedPageRank(restart)
-                for ((key, v) in graph.scores(rank, "t:")) {
+                val rank = graph.personalizedPageRank(restart, iterations = 18, tolerance = 1e-5)
+                val top = graph.scores(rank, "t:").entries.sortedByDescending { it.value }
+                var taken = 0
+                for ((key, v) in top) {
+                    if (taken >= GRAPH_TOP) break
                     val c = cand(TrackId(key)) ?: continue
                     c.add(RecSource.GRAPH, v, null)
+                    taken++
                 }
             }
         }
@@ -299,66 +314,80 @@ class RecEngine(
         // Artist affinity, explicit artist seeds and related artists (artist-level co-occurrence).
         if (plan.base.containsKey(RecSource.ARTIST)) {
             val related = HashMap<String, Pair<Double, String>>()
-            val sources = (seeds.artists.keys + taste.topArtists(10)).distinct()
-            for (a in sources) {
+            val tasteArtists = taste.topArtists(20)
+            for (a in (seeds.artists.keys + tasteArtists.take(10)).distinct()) {
                 val wa = maxOf(seeds.artists[a] ?: 0.0, taste.artistAffinity(a))
                 for (n in model.index.artists.neighbours(a, 10)) {
                     val v = wa * n.score
                     if (v > (related[n.key]?.first ?: 0.0)) related[n.key] = v to a
                 }
             }
-            val top5 = taste.topArtists(5).toSet()
-            for (t in candidates.values) {
-                val a = t.artistKey
+            val top5 = tasteArtists.take(5).toSet()
+            for (a in (seeds.artists.keys + tasteArtists + related.keys).distinct()) {
                 val seedW = seeds.artists[a] ?: 0.0
                 val aff = taste.artistAffinity(a) * plan.tasteWeight
                 val rel = related[a]
                 if (seedW <= 0 && aff <= 0.05 && rel == null) continue
-                val c = cand(t.id) ?: continue
                 val direct = maxOf(seedW, aff)
-                if (direct > 0) c.max(RecSource.ARTIST, direct, Explain.sameArtist(model.artistName(a), a in top5))
-                if (rel != null) c.max(RecSource.ARTIST, 0.8 * rel.first, Explain.relatedArtist(model.artistName(rel.second)))
-            }
-        }
-
-        // Context, intent, cold-start seeds, discovery fit — cheap per-candidate signals over the whole pool.
-        val ctx = model.context
-        val perCandidate = (plan.useContext && taste.contextTotals[ctx.index] > 0) || (plan.useIntent && taste.intents.isNotEmpty()) ||
-            (plan.useCold && taste.coldArtists.isNotEmpty()) || plan.base.containsKey(RecSource.DISCOVERY) || plan.rediscover
-        if (perCandidate) for (t in candidates.values) {
-            val id = t.id
-            val a = t.artistKey
-            if (plan.useContext) {
-                val v = taste.contextAffinity(a, ctx)
-                if (v > 0.05) cand(id)?.max(RecSource.CONTEXT, v, if (taste.contextClaimHolds(a, ctx)) Explain.context(model.artistName(a), ctx) else null)
-            }
-            if (plan.useIntent) taste.intentMatch(t)?.let { (intent, v) -> cand(id)?.max(RecSource.INTENT, v, Explain.search(intent.display)) }
-            if (plan.useCold && a in taste.coldArtists) cand(id)?.max(RecSource.SEED, taste.coldWeight, Explain.seed(model.artistName(a)))
-            if (plan.base.containsKey(RecSource.DISCOVERY) && !taste.played(id) && id !in taste.likes) {
-                val fit = 0.5 * taste.artistAffinity(a) + 0.3 * taste.genreAffinity(t.genres) + 0.2 * taste.decadeAffinity(t.year)
-                val genreSeed = if (plan.seedGenres.isNotEmpty() && model.features(t).genres.any { it in plan.seedGenres }) 0.3 else 0.0
-                // Unplayed songs with no fit at all only count when another source already found them.
-                val existing = cands[id]
-                if (existing != null) existing.max(RecSource.DISCOVERY, 0.15 + fit + genreSeed, null)
-                else if (fit + genreSeed > 0.1) cand(id)?.max(RecSource.DISCOVERY, 0.15 + fit + genreSeed, null)
-            }
-            if (plan.rediscover) {
-                val last = taste.lastPlayed[id]
-                if (last != null && model.now - last > 30 * DAY_MS.toLong()) {
-                    val v = taste.trackLongNorm(id) * (1 - taste.trackShortNorm(id)) * minOf(1.0, (model.now - last) / DAY_MS / 90.0)
-                    if (v > 0.05) cand(id)?.max(RecSource.REDISCOVER, v, null)
+                for (t in byArtist[a].orEmpty()) {
+                    val c = cand(t.id) ?: continue
+                    if (direct > 0) c.max(RecSource.ARTIST, direct, Explain.sameArtist(model.artistName(a), a in top5))
+                    if (rel != null) c.max(RecSource.ARTIST, 0.8 * rel.first, Explain.relatedArtist(model.artistName(rel.second)))
                 }
             }
         }
 
-        // Content similarity to the anchors — computed for a shortlist (cheap sources first) plus analysed files.
+        // Context: artists this listener plays at this time of day / week.
+        val ctx = model.context
+        if (plan.useContext && taste.contextTotals[ctx.index] > 0) {
+            for (a in taste.contextArtists[ctx.index].keys) {
+                val v = taste.contextAffinity(a, ctx)
+                if (v <= 0.05) continue
+                val why = if (taste.contextClaimHolds(a, ctx)) Explain.context(model.artistName(a), ctx) else null
+                for (t in byArtist[a].orEmpty()) cand(t.id)?.max(RecSource.CONTEXT, v, why)
+            }
+        }
+        // Recent searches.
+        if (plan.useIntent && taste.intents.isNotEmpty()) {
+            for (t in candidates.values) taste.intentMatch(t, artistOf(t))?.let { (intent, v) -> cand(t.id)?.max(RecSource.INTENT, v, Explain.search(intent.display)) }
+        }
+        // Onboarding picks while history is thin.
+        if (plan.useCold && taste.coldArtists.isNotEmpty() && taste.coldWeight > 0.05) {
+            for (a in taste.coldArtists) for (t in byArtist[a].orEmpty()) cand(t.id)?.max(RecSource.SEED, taste.coldWeight, Explain.seed(model.artistName(a)))
+        }
+        // Discovery: never-played songs that fit. Only the best-fitting few hundred join as new candidates.
+        if (plan.base.containsKey(RecSource.DISCOVERY)) {
+            val fits = ArrayList<Pair<Track, Double>>()
+            for (t in unplayed) {
+                if (!allowed(t)) continue
+                val f = model.features(t)
+                var fit = 0.5 * taste.artistAffinity(f.artistKey) + 0.3 * taste.genreAffinity(f.genres) + 0.2 * taste.decadeAffinity(f.year)
+                if (plan.seedGenres.isNotEmpty() && f.genres.any { it in plan.seedGenres }) fit += 0.3
+                val existing = cands[t.id]
+                if (existing != null) existing.max(RecSource.DISCOVERY, 0.15 + fit, null) else if (fit > 0.1) fits += t to fit
+            }
+            fits.sortWith(compareByDescending<Pair<Track, Double>> { it.second }.thenBy { it.first.id.value })
+            for ((t, fit) in fits.take(DISCOVERY_TOP)) cand(t.id)?.max(RecSource.DISCOVERY, 0.15 + fit, null)
+        }
+        // Rediscovery: long-term favourites gone quiet.
+        if (plan.rediscover) {
+            for ((id, last) in taste.lastPlayed) {
+                if (model.now - last <= 30 * DAY_MS.toLong()) continue
+                val v = taste.trackLongNorm(id) * (1 - taste.trackShortNorm(id)) * minOf(1.0, (model.now - last) / DAY_MS / 90.0)
+                if (v > 0.05) cand(id)?.max(RecSource.REDISCOVER, v, null)
+            }
+        }
+
+        // Content similarity to the anchors — for a shortlist (cheap sources first), analysed files and same-genre songs.
         if (plan.base.containsKey(RecSource.CONTENT) && seeds.content.isNotEmpty()) {
             val prelim = cands.values.sortedByDescending { c -> c.raw.sum() }.take(CONTENT_SHORTLIST).map { it.track }
-            val analysed = candidates.values.filter { model.input.traits.containsKey(it.id) && allowed(it) }.take(CONTENT_SHORTLIST)
+            val analysed = candidates.values.asSequence().filter { model.input.traits.containsKey(it.id) && allowed(it) }.take(CONTENT_SHORTLIST).toList()
             val sameGenre = if (plan.seedGenres.isEmpty()) emptyList() else
                 candidates.values.asSequence().filter { allowed(it) && model.features(it).genres.any { g -> g in plan.seedGenres } }.take(CONTENT_SHORTLIST).toList()
             val anchorFeatures = seeds.content.map { it to model.features(it) }
-            for (t in (prelim + analysed + sameGenre).distinctBy { it.id }) {
+            val seen = HashSet<TrackId>()
+            for (t in prelim + analysed + sameGenre) {
+                if (!seen.add(t.id)) continue
                 val f = model.features(t)
                 var best = 0.0
                 var why: Explanation? = null
@@ -402,7 +431,7 @@ class RecEngine(
             val id = t.id
             val f = model.features(t)
             val energyFit = if (plan.energyTarget != null && f.energy != null) 1 - minOf(1.0, abs(f.energy - plan.energyTarget) * 2) else 0.5
-            val tasteScore = plan.tasteWeight * (0.30 * taste.artistAffinity(t.artistKey) + 0.15 * taste.genreAffinity(f.genres) +
+            val tasteScore = plan.tasteWeight * (0.30 * taste.artistAffinity(f.artistKey) + 0.15 * taste.genreAffinity(f.genres) +
                 0.05 * taste.decadeAffinity(f.year) + 0.10 * energyFit)
             val fam = taste.familiarity(id)
             val dial = 0.25 * (plan.familiarity * fam + (1 - plan.familiarity) * (1 - fam))
@@ -410,7 +439,7 @@ class RecEngine(
                 1.2 * exp(-max(0L, model.now - last) / 3_600_000.0 / plan.recencyHours)
             } ?: 0.0 else 0.0
             val skips = (taste.trackEarlySkips[id] ?: 0) - (taste.positivePlays[id] ?: 0) / 2.0
-            val penalty = recency + 0.5 * (taste.artistEarlySkipRate[t.artistKey] ?: 0.0) + 0.3 * minOf(3.0, max(0.0, skips))
+            val penalty = recency + 0.5 * (taste.artistEarlySkipRate[f.artistKey] ?: 0.0) + 0.3 * minOf(3.0, max(0.0, skips))
             val score = src + tasteScore + dial - penalty
 
             // Explanation: the strongest source with real evidence, unless it's much weaker than the top source.
@@ -434,13 +463,13 @@ class RecEngine(
         val userPlaylist = taste.playlistsOf[id]?.firstOrNull { it.userMade }
         return when {
             source == RecSource.REDISCOVER -> model.peakMonth(id).let { p -> Explain.rediscover(p?.second ?: 0, p?.first, taste.likes[id], model.now, model.input.zone) }
-            source == RecSource.DISCOVERY && !taste.played(id) && taste.artistAffinity(t.artistKey) >= 0.25 -> Explain.newFromArtist(t.artist)
+            source == RecSource.DISCOVERY && !taste.played(id) && taste.artistAffinity(artistOf(t)) >= 0.25 -> Explain.newFromArtist(t.artist)
             source == RecSource.DISCOVERY && !taste.played(id) -> Explain.newNear(nearestKnownArtist(t))
             id in taste.likes -> Explain.liked()
             userPlaylist != null -> Explain.playlist(userPlaylist.name)
             taste.trackShortNorm(id) >= 0.6 -> Explain.heavyRotation()
-            !taste.played(id) && taste.artistAffinity(t.artistKey) >= 0.25 -> Explain.newFromArtist(t.artist)
-            taste.artistAffinity(t.artistKey) >= 0.5 -> Explain.sameArtist(t.artist, true)
+            !taste.played(id) && taste.artistAffinity(artistOf(t)) >= 0.25 -> Explain.newFromArtist(t.artist)
+            taste.artistAffinity(artistOf(t)) >= 0.5 -> Explain.sameArtist(t.artist, true)
             else -> {
                 val g = model.features(t).genres.maxByOrNull { taste.genreAffinity(listOf(it)) }
                 if (g != null && taste.genreAffinity(listOf(g)) >= 0.5) Explain.genre(g)
@@ -451,10 +480,11 @@ class RecEngine(
 
     /** A related artist the listener actually plays (from artist co-occurrence or shared genres), for "close to …". */
     private fun nearestKnownArtist(t: Track): String? {
-        model.index.artists.neighbours(t.artistKey, 3).firstOrNull { taste.artistAffinity(it.key) > 0.2 }?.let { return model.artistName(it.key) }
+        val key = artistOf(t)
+        model.index.artists.neighbours(key, 3).firstOrNull { taste.artistAffinity(it.key) > 0.2 }?.let { return model.artistName(it.key) }
         val g = model.features(t).genres
         if (g.isEmpty()) return null
-        return taste.topArtists(15).firstOrNull { a -> a != t.artistKey && candidates.values.any { it.artistKey == a && model.features(it).genres.any { x -> x in g } } }
+        return taste.topArtists(15).firstOrNull { a -> a != key && byArtist[a].orEmpty().any { x -> model.features(x).genres.any { it in g } } }
             ?.let { model.artistName(it) }
     }
 
@@ -470,12 +500,15 @@ class RecEngine(
         keepOrder: Boolean = false,
     ): List<Recommendation> {
         val plays = { id: TrackId -> taste.positivePlays[id] ?: 0 }
-        val deduped = Reranker.dedupe(items.filter { Reranker.eligible(it.track, feedback) }, prefer, plays)
+        // Only the head can make the list: de-duplicate that, not the whole pool (song keys are regex work).
+        val head = if (keepOrder) items else items.sortedWith(compareByDescending<Recommendation> { it.score }.thenBy { it.track.id.value }).take(DEDUPE_HEAD)
+        val deduped = Reranker.dedupe(head, prefer, plays) { t -> songKeys.getOrPut(t.id) { Reranker.songKey(t) } }
         // keepOrder: relevance = position in the given list (MMR and artist spacing still apply).
         val ranked = if (keepOrder) deduped.mapIndexed { i, r -> r.copy(score = (deduped.size - i).toDouble()) } else deduped
         return Reranker.rerank(
             ranked, limit, model::similarity, lambda = lambda, artistGap = artistGap, maxPerArtist = maxPerArtist,
             history = history, energyTarget = energyTarget, energyOf = { model.features(it).energy?.toDouble() }, transition = transition,
+            artistOf = ::artistOf,
         )
     }
 
@@ -512,8 +545,8 @@ class RecEngine(
             val v = DoubleArray(e.size + ARTIST_DIMS + GENRE_DIMS + 1)
             for (k in e.indices) v[k] = e[k]
             if (t != null) {
-                v[e.size + Math.floorMod(t.artistKey.hashCode(), ARTIST_DIMS)] += 0.9
-                val gs = f!!.genres
+                v[e.size + Math.floorMod(f!!.artistKey.hashCode(), ARTIST_DIMS)] += 0.9
+                val gs = f.genres
                 for (g in gs) v[e.size + ARTIST_DIMS + Math.floorMod(g.hashCode(), GENRE_DIMS)] += 0.5 / gs.size
                 v[v.size - 1] = 0.3 * (f.energy?.toDouble() ?: 0.5)
             }
@@ -528,8 +561,8 @@ class RecEngine(
         for ((id, t) in model.input.tracks) tracks.putIfAbsent(id, t)
         for (t in tracks.values) {
             val node = WalkGraph.track(t.id.value)
-            b.edge(node, WalkGraph.artist(t.artistKey), 1.0)
             val f = model.features(t)
+            b.edge(node, WalkGraph.artist(f.artistKey), 1.0)
             if (f.genres.isNotEmpty()) for (g in f.genres) b.edge(node, WalkGraph.genre(g), 0.6 / f.genres.size)
             f.decade?.let { b.edge(node, WalkGraph.era(it), 0.15) }
         }
@@ -538,7 +571,7 @@ class RecEngine(
             for ((id, _) in p.tracks) b.edge(WalkGraph.track(id.value), WalkGraph.playlist(p.id), w)
         }
         for (id in model.index.tracks.items) {
-            for (n in model.index.tracks.neighbours(id, 15)) b.edge(WalkGraph.track(id.value), WalkGraph.track(n.key.value), 2.0 * n.score)
+            for (n in model.index.tracks.neighbours(id, 10)) b.edge(WalkGraph.track(id.value), WalkGraph.track(n.key.value), 2.0 * n.score)
         }
         return b.build()
     }
@@ -548,7 +581,10 @@ class RecEngine(
     private companion object {
         val SOURCES = RecSource.entries.toTypedArray()
         const val DAY_MS = 86_400_000.0
-        const val CONTENT_SHORTLIST = 1500
+        const val CONTENT_SHORTLIST = 800
+        const val GRAPH_TOP = 600
+        const val DISCOVERY_TOP = 300
+        const val DEDUPE_HEAD = 600
         const val ARTIST_DIMS = 24
         const val GENRE_DIMS = 12
         val SESSION = RecSource.SESSION

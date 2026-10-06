@@ -2,7 +2,6 @@ package com.arnav.music.domain.recommend
 
 import com.arnav.music.domain.model.PlayEvent
 import com.arnav.music.domain.model.TrackId
-import java.time.DayOfWeek
 import java.time.Instant
 import java.time.ZoneId
 import kotlin.math.exp
@@ -130,11 +129,17 @@ data class ListeningContext(val part: DayPart, val weekend: Boolean) {
         const val COUNT = 8
 
         fun at(epochMs: Long, zone: ZoneId): ListeningContext {
-            val t = Instant.ofEpochMilli(epochMs).atZone(zone)
+            val offset = zone.rules.getOffset(Instant.ofEpochMilli(epochMs)).totalSeconds
+            val local = Math.floorDiv(epochMs, 1000L) + offset
+            var day = Math.floorDiv(local, 86_400L)
+            val hour = ((local - day * 86_400L) / 3_600L).toInt()
             // A Saturday 1 am is still Friday night out; count late nights with the day they began.
-            val day = if (t.hour < 5) t.dayOfWeek.minus(1) else t.dayOfWeek
-            val weekend = day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY || (day == DayOfWeek.FRIDAY && DayPart.of(t.hour) == DayPart.NIGHT)
-            return ListeningContext(DayPart.of(t.hour), weekend)
+            if (hour < 5) day -= 1
+            // 1970-01-01 was a Thursday; 0 = Monday … 6 = Sunday.
+            val dow = Math.floorMod(day + 3, 7L).toInt()
+            val part = DayPart.of(hour)
+            val weekend = dow >= 5 || (dow == 4 && part == DayPart.NIGHT)
+            return ListeningContext(part, weekend)
         }
 
         fun fromIndex(i: Int) = ListeningContext(DayPart.entries[i / 2], i % 2 == 1)

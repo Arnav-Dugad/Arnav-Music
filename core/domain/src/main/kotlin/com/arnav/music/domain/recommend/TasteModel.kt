@@ -120,15 +120,24 @@ class TasteModel(
     /** 1 with no history, fading to ~0 after ~100 listens: how much onboarding picks should matter. */
     val coldWeight: Double get() = exp(-eventCount / 40.0)
 
-    fun intentMatch(track: Track): Pair<Intent, Double>? {
+    /**
+     * The recent search [track] answers best, with a 0..1 strength (recency-weighted), or null.
+     * [artistKey] is the track's artist key (passed in because computing it isn't free).
+     */
+    fun intentMatch(track: Track, artistKey: String): Pair<Intent, Double>? {
         if (intents.isEmpty()) return null
+        val text = (track.title + " " + track.artist).lowercase()
+        var words: Set<String>? = null
         var best: Pair<Intent, Double>? = null
-        val words = TasteModelBuilder.tokens(track.title + " " + track.artist)
         for (i in intents) {
+            val byArtist = i.artistKey.isNotEmpty() && i.artistKey == artistKey
+            // Cheap substring pre-check before splitting the title into words.
+            if (!byArtist && i.tokens.none { text.contains(it) }) continue
+            val w = words ?: TasteModelBuilder.tokens(text).also { words = it }
             val s = when {
-                i.artistKey.isNotEmpty() && i.artistKey == track.artistKey -> 0.8
-                i.tokens.isNotEmpty() && words.containsAll(i.tokens) -> 1.0
-                i.tokens.size >= 2 && i.tokens.count { it in words } >= i.tokens.size - 1 -> 0.5
+                w.containsAll(i.tokens) -> 1.0
+                byArtist -> 0.8
+                i.tokens.size >= 2 && i.tokens.count { it in w } >= i.tokens.size - 1 -> 0.5
                 else -> 0.0
             } * i.weight
             if (s > 0 && (best == null || s > best.second)) best = i to s
@@ -145,7 +154,7 @@ object TasteModelBuilder {
 
     fun tokens(s: String): Set<String> = s.lowercase().split(tokenSplit).filter { it.length >= 2 && it !in stop }.toSet()
 
-    fun build(input: RecInput, now: Long): TasteModel {
+    fun build(input: RecInput, now: Long, artistKeys: ArtistKeyCache = ArtistKeyCache()): TasteModel {
         val events = input.events.sortedBy { it.startedAt }
         val replays = Engagement.replays(events)
         val trackLong = HashMap<TrackId, Double>()
@@ -207,12 +216,13 @@ object TasteModelBuilder {
         for ((id, at) in input.likes) {
             if (id in input.feedback.notInterested) continue
             val t = input.tracks[id]
+            val ak = t?.let { artistKeys.of(it.artist) }
             trackLong.merge(id, 2.0, Double::plus)
             trackShort.merge(id, 1.5 * Decay.Short.factor(now - at), Double::plus)
-            if (t != null) {
-                artistLong.merge(t.artistKey, 1.5, Double::plus)
-                artistShort.merge(t.artistKey, 1.0 * Decay.Short.factor(now - at), Double::plus)
-                names.putIfAbsent(t.artistKey, t.artist)
+            if (t != null && ak != null) {
+                artistLong.merge(ak, 1.5, Double::plus)
+                artistShort.merge(ak, 1.0 * Decay.Short.factor(now - at), Double::plus)
+                names.putIfAbsent(ak, t.artist)
                 for (g in t.genres) genre.merge(g.lowercase(), 0.8, Double::plus)
                 t.year?.takeIf { it in 1900..2100 }?.let { decade.merge(it / 10 * 10, 0.5, Double::plus) }
             }
@@ -228,8 +238,9 @@ object TasteModelBuilder {
                 trackLong.merge(id, w, Double::plus)
                 trackShort.merge(id, w * Decay.Short.factor(now - addedAt), Double::plus)
                 val t = input.tracks[id] ?: continue
-                names.putIfAbsent(t.artistKey, t.artist)
-                artistLong.merge(t.artistKey, w * 0.5, Double::plus)
+                val ak = artistKeys.of(t.artist)
+                names.putIfAbsent(ak, t.artist)
+                artistLong.merge(ak, w * 0.5, Double::plus)
                 for (g in t.genres) genre.merge(g.lowercase(), w * 0.4, Double::plus)
             }
         }
@@ -239,7 +250,7 @@ object TasteModelBuilder {
         for ((id, at) in input.feedback.moreLikeThis) {
             trackShort.merge(id, 2.0 * Decay.Short.factor(now - at), Double::plus)
             trackLong.merge(id, 1.0, Double::plus)
-            input.tracks[id]?.let { t -> artistShort.merge(t.artistKey, 1.5 * Decay.Short.factor(now - at), Double::plus) }
+            input.tracks[id]?.let { t -> artistShort.merge(artistKeys.of(t.artist), 1.5 * Decay.Short.factor(now - at), Double::plus) }
         }
 
         val intents = input.searches.asSequence()
@@ -255,7 +266,6 @@ object TasteModelBuilder {
         val moods = input.coldStart.moods.mapNotNull { m -> Mood.entries.firstOrNull { it.name.equals(m, true) || it.label.equals(m, true) } }
         val energyMean = if (eW > 0) eSum / eW else null
         val energySd = if (eW > 0 && energyMean != null) sqrt(max(0.0, eSq / eW - energyMean * energyMean)) else null
-        for (t in input.tracks.values) names.putIfAbsent(t.artistKey, t.artist)
         for (s in input.coldStart.seedArtists) names.putIfAbsent(ArtistKey.of(s), s)
 
         return TasteModel(

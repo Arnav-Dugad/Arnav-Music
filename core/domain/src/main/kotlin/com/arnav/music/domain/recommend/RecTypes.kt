@@ -1,5 +1,6 @@
 package com.arnav.music.domain.recommend
 
+import com.arnav.music.domain.catalog.TrackClassifier
 import com.arnav.music.domain.model.ArtistKey
 import com.arnav.music.domain.model.PlayEvent
 import com.arnav.music.domain.model.Track
@@ -68,7 +69,8 @@ data class Feedback(
     val blockedArtists: Set<String> = emptySet(),
     val moreLikeThis: Map<TrackId, Long> = emptyMap(),
 ) {
-    fun allows(track: Track): Boolean = track.id !in notInterested && track.artistKey !in blockedArtists
+    fun allows(track: Track): Boolean = allows(track.id, track.artistKey)
+    fun allows(id: TrackId, artistKey: String): Boolean = id !in notInterested && artistKey !in blockedArtists
 
     companion object {
         val None = Feedback()
@@ -124,3 +126,25 @@ data class DailyMix(
     val tracks: List<Recommendation>,
     val topArtists: List<String>,
 )
+
+/** Memoised [ArtistKey.of] (a few regexes per call) — most songs share a handful of artist strings. */
+class ArtistKeyCache {
+    private val cache = HashMap<String, String>()
+    fun of(raw: String): String = cache.getOrPut(raw) { ArtistKey.of(raw) }
+}
+
+/**
+ * Memoised "is this a real single?" ([com.arnav.music.domain.catalog.isSingle] runs ~30 title
+ * regexes). Keep one instance across refreshes; entries are keyed by id + title + length.
+ */
+class SinglesCache(private val maxSize: Int = 60_000) {
+    private val cache = HashMap<String, Boolean>()
+    fun isSingle(t: Track): Boolean {
+        val key = t.id.value + "\u0000" + t.title + "\u0000" + t.album + "\u0000" + t.durationMs + "\u0000" + t.compilation
+        cache[key]?.let { return it }
+        if (cache.size >= maxSize) cache.clear()
+        val v = !t.compilation && TrackClassifier.isSingle(listOfNotNull(t.title, t.album).joinToString(" "), t.durationMs)
+        cache[key] = v
+        return v
+    }
+}

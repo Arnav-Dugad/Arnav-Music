@@ -76,33 +76,44 @@ class WalkGraph private constructor(
         return out
     }
 
+    /** Collects edges in flat arrays (parallel edges simply add up), then packs them into CSR. */
     class Builder {
         private val index = HashMap<String, Int>()
         private val keys = ArrayList<String>()
-        private val adj = ArrayList<HashMap<Int, Double>>()
+        private var src = IntArray(1024)
+        private var dst = IntArray(1024)
+        private var w = DoubleArray(1024)
+        private var edges = 0
 
-        fun node(key: String): Int = index.getOrPut(key) { keys += key; adj += HashMap(); keys.size - 1 }
+        fun node(key: String): Int = index.getOrPut(key) { keys += key; keys.size - 1 }
 
         /** Adds (or strengthens) the undirected edge a — b. */
         fun edge(a: String, b: String, weight: Double) {
             if (weight <= 0 || a == b) return
             val i = node(a); val j = node(b)
-            adj[i].merge(j, weight, Double::plus)
-            adj[j].merge(i, weight, Double::plus)
+            if (edges + 2 > src.size) {
+                val n = src.size * 2
+                src = src.copyOf(n); dst = dst.copyOf(n); w = w.copyOf(n)
+            }
+            src[edges] = i; dst[edges] = j; w[edges] = weight; edges++
+            src[edges] = j; dst[edges] = i; w[edges] = weight; edges++
         }
 
         fun build(): WalkGraph {
             val n = keys.size
             val rowStart = IntArray(n + 1)
-            for (i in 0 until n) rowStart[i + 1] = rowStart[i] + adj[i].size
-            val cols = IntArray(rowStart[n])
-            val probs = DoubleArray(rowStart[n])
-            for (i in 0 until n) {
-                val row = adj[i].entries.sortedBy { it.key }
-                val sum = row.sumOf { it.value }
-                var p = rowStart[i]
-                for ((j, w) in row) { cols[p] = j; probs[p] = w / sum; p++ }
+            for (e in 0 until edges) rowStart[src[e] + 1]++
+            for (i in 0 until n) rowStart[i + 1] += rowStart[i]
+            val fill = rowStart.copyOf(n)
+            val cols = IntArray(edges)
+            val probs = DoubleArray(edges)
+            val rowSum = DoubleArray(n)
+            for (e in 0 until edges) {
+                val p = fill[src[e]]++
+                cols[p] = dst[e]; probs[p] = w[e]
+                rowSum[src[e]] += w[e]
             }
+            for (i in 0 until n) for (p in rowStart[i] until rowStart[i + 1]) probs[p] /= rowSum[i]
             return WalkGraph(keys.toTypedArray(), HashMap(index), rowStart, cols, probs)
         }
     }
