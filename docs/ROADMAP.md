@@ -4,12 +4,12 @@ Ideas ranked by impact. Everything here can stay zero-cost.
 
 ## UI & interaction
 1. **Shared-element artwork everywhere**: cards on Home/Library → Collection hero → Now Playing, all one continuous element (`SharedTransitionLayout`).
-2. **Liquid glass shader (AGSL, Android 13+)**: refraction and chromatic edge on the MorphBar and sheets, with the current material as fallback.
+2. **Liquid glass shader (AGSL, Android 13+)**: refraction and chromatic edge on the MorphBar and sheets, with the current material as fallback. ✅ Shipped (MorphBar).
 3. **Adaptive tablet "Studio" layout**: three panes (library · queue · Now Playing), with drag-and-drop between them.
-4. **Swipeable artwork carousel** in Now Playing: previous and next covers peek at the edges, so swiping is a real physical gesture.
+4. **Swipeable artwork carousel** in Now Playing: previous and next covers peek at the edges, so swiping is a real physical gesture. ✅ Shipped.
 5. **Haptic waveform scrubbing**: subtle ticks at song sections while seeking (local files analysed on device).
 6. **Mini-player personalities**: compact pill, expanded card, and a floating bubble mode while multitasking.
-7. **Glance home-screen widgets**: Now Playing (local), Moments shortcut, "Ask Arnav AI", weekly recap.
+7. **Glance home-screen widgets**: Now Playing (local), Moments shortcut, "Ask Arnav AI", weekly recap. ✅ Now Playing, Moments and Ask Arnav AI shipped.
 8. **Dynamic app icon accent** (Android 13+ themed icons) and an artwork-tinted quick-settings tile.
 9. **Edge-lighting progress** on OLED: a hairline progress glow around the screen edge while the screen is idle.
 10. **Keyboard/D-pad polish** for Chromebooks, DeX and Android TV (focus rings, shortcuts sheet).
@@ -18,7 +18,7 @@ Ideas ranked by impact. Everything here can stay zero-cost.
 11. **Spring-physics queue**: items keep inertia when flung; elastic overscroll on reorder.
 12. **Track change "depth swap"**: the old cover sinks with a blur, the new one rises — using RenderEffect where the budget allows.
 13. **Beat-reactive Living Artwork** for local files (on-device onset detection, capped at 0.5 Hz pulses — no flashing).
-14. **Theme cross-fade**: a circular reveal from the toggle when switching Light/Dark/OLED.
+14. **Theme cross-fade**: a circular reveal from the toggle when switching Light/Dark/OLED. ✅ Shipped (also for glass modes).
 15. **Morphing icons** (play → pause, heart → filled, queue → check) via animated vectors.
 16. **Predictive-back previews** for the player sheet and every detail screen.
 
@@ -38,7 +38,7 @@ Ideas ranked by impact. Everything here can stay zero-cost.
 27. **Listening streaks and milestones** (first 1,000 minutes, 100 artists), never gamified with nags.
 28. **Year in Music recap** with an animated story player (procedural visuals, shareable cards).
 29. **Artist spiral**: chain-discovery through co-listening and shared styles.
-30. **Import playlists** from a pasted YouTube playlist URL (1 quota unit per page).
+30. **Import playlists** from a pasted YouTube playlist URL (1 quota unit per page). ✅ Shipped as account import (OAuth, read-only).
 31. **Encrypted local backup/export** (JSON + key) to Drive via the system file picker — no server needed.
 32. **Multi-device "continue listening"** using the existing Firestore free tier (one small document, debounced).
 

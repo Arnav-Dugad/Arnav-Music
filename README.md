@@ -64,6 +64,16 @@ Everything around playback — library, history, recommendations, Taste DNA, Mom
 - **Listening Timeline & Time Machine**: “Take me back to this day”, “You loved these three months ago”, “Your January era” — only claims the data supports.
 - **Queue**: drag-to-reorder with floating lift and neighbour displacement, swipe actions, a **Journey** timeline with ETAs, save queue as playlist.
 - **Command palette** (Ctrl/⌘+K on keyboards): commands, moments, settings, search and “Ask Arnav AI …”.
+- **Song / Video switch** (like YouTube Music): every YouTube track has a Song | Video toggle in Now Playing. *Song* finds the label's official “Topic” art track; *Video* finds the music video. Both play in the visible official player, and the switch keeps your position.
+- **Singles only**: recommendations, AI sessions and the *Songs* search filter drop mixes, mashups, jukeboxes, “1 hour” loops and anything over 13 minutes. Official “Topic” uploads rank first.
+- **Unplayable-video rescue**: when an uploader blocks embedding, a card offers *Find another upload* (one cached search, Topic channels preferred), *Open in YouTube Music* or *Skip*, and can do it automatically (Settings → Playback).
+- **Label credits**: titles like `Song | Film | Actor A, Actor B | Composer` become title, album (the film) and credits.
+- **Artwork flight**: tap a Home card and its cover flies into the player.
+- **Cover carousel**: swipe the Now Playing cover left/right to move through the queue, with the neighbours peeking in.
+- **Liquid glass** (Android 13+): an AGSL lens shader bends and refracts the artwork behind the mini player and glass previews.
+- **Circular theme reveal**: switching theme or glass mode expands the new look from your finger.
+- **Home-screen widget**: artwork, title and play/skip, plus *Ask Arnav AI* and *Moments* shortcuts. It resizes with its cell size.
+- **Import from YouTube**: Library → ☁︎ copies your YouTube playlists and *Liked videos* into Arnav playlists, with live progress. It uses read-only access, and the token never leaves memory.
 
 **Everything else**
 - Home composed from ≤8 prioritised sections (time-of-day aware); never an empty first launch.
@@ -201,7 +211,8 @@ Arnav Music **does not**: extract stream URLs, use yt-dlp or similar, separate a
 - Lyrics show an empty state until a licensed lyrics provider is added.
 - No ReplayGain/loudness normalisation (not reliably supported by Media3 across devices); fades and skip-silence are provided instead.
 - Baseline profile is hand-written; a generated profile (Macrobenchmark) is on the roadmap.
-- Home-screen widgets are on the roadmap.
+- YouTube Music's own *Liked music* list isn't exposed by the YouTube Data API. Import brings over *Liked videos* and your playlists instead.
+- Importing playlists needs `youtube.readonly` on the OAuth consent screen. While the app is unverified, add yourself as a test user (see docs/YOUTUBE_SETUP.md).
 
 ## Roadmap
 See the living list in the latest release notes and [docs/ROADMAP.md](docs/ROADMAP.md).
