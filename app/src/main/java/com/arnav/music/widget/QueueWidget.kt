@@ -5,7 +5,6 @@ import android.graphics.Bitmap
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -36,7 +35,6 @@ import androidx.glance.layout.width
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
-import androidx.glance.unit.ColorProvider
 import com.arnav.music.domain.model.SourceType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -48,29 +46,32 @@ class QueueWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val initial = WidgetBus.current(context)
         withContext(Dispatchers.IO) { WidgetBus.ensureArt(context, initial.artworkUrl) }
+        Widgets.load()
         provideContent {
             val snap by WidgetBus.snapshot.collectAsState()
             val art by WidgetBus.art.collectAsState()
+            val materialYou by Widgets.materialYou.collectAsState()
             val s = snap ?: initial
-            Content(context, s, art.bitmap.takeIf { art.url == s.artworkUrl })
+            WidgetTheme(materialYou) {
+                Content(context, s, art.bitmap.takeIf { art.url == s.artworkUrl })
+            }
         }
     }
 
     @Composable
     private fun Content(context: Context, s: WidgetSnapshot, art: Bitmap?) {
         val size = LocalSize.current
-        val white = ColorProvider(Color.White)
-        val muted = ColorProvider(Color(0xB3FFFFFF))
-        val faint = ColorProvider(Color(0x80FFFFFF))
+        val p = widgetPalette()
+        val pad = p.padding(12.dp)
         val open = openPlayerAction(context)
         val title = s.title
-        Column(GlanceModifier.fillMaxSize().cornerRadius(24.dp).background(Color(0xFF15121F)).padding(12.dp)) {
+        Column(GlanceModifier.widgetRoot(p, pad)) {
             if (title == null) {
                 Box(GlanceModifier.fillMaxSize().clickable(open), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Artwork(null, 44)
                         Spacer(GlanceModifier.height(10.dp))
-                        Text(EMPTY, style = TextStyle(color = muted, fontSize = 13.sp), maxLines = 2)
+                        Text(EMPTY, style = TextStyle(color = p.body, fontSize = 13.sp), maxLines = 2)
                     }
                 }
             } else {
@@ -80,41 +81,41 @@ class QueueWidget : GlanceAppWidget() {
                         Artwork(art, 48)
                         Spacer(GlanceModifier.width(10.dp))
                         Column {
-                            Text(title, style = TextStyle(color = white, fontSize = 15.sp, fontWeight = FontWeight.Bold), maxLines = 1)
-                            Text(s.artist.orEmpty(), style = TextStyle(color = muted, fontSize = 12.sp), maxLines = 1)
+                            Text(title, style = TextStyle(color = p.title, fontSize = 15.sp, fontWeight = FontWeight.Bold), maxLines = 1)
+                            Text(s.artist.orEmpty(), style = TextStyle(color = p.body, fontSize = 12.sp), maxLines = 1)
                         }
                     }
                     TransportButtons(context, s)
                 }
                 Spacer(GlanceModifier.height(8.dp))
-                Text("UP NEXT", style = TextStyle(color = faint, fontSize = 11.sp, fontWeight = FontWeight.Medium), maxLines = 1)
+                Text("UP NEXT", style = TextStyle(color = p.faint, fontSize = 11.sp, fontWeight = FontWeight.Medium), maxLines = 1)
                 Spacer(GlanceModifier.height(4.dp))
-                // Fixed part ≈ 24 padding + 48 header + 8 + 15 label + 4; each row is 34 + 2 dp.
-                val rows = ((size.height.value - 99f) / 36f).toInt().coerceIn(1, WidgetQueueItem.MAX)
+                // Fixed part ≈ 2 × padding + 48 header + 8 + 15 label + 4; each row is 34 + 2 dp.
+                val rows = ((size.height.value - 2 * pad.value - 75f) / 36f).toInt().coerceIn(1, WidgetQueueItem.MAX)
                 val items = s.upNext.take(rows)
                 if (items.isEmpty()) {
                     Box(GlanceModifier.fillMaxWidth().padding(vertical = 8.dp).clickable(open)) {
-                        Text(EMPTY, style = TextStyle(color = muted, fontSize = 13.sp), maxLines = 2)
+                        Text(EMPTY, style = TextStyle(color = p.body, fontSize = 13.sp), maxLines = 2)
                     }
                 } else {
-                    items.forEach { item -> QueueRow(context, item, white, muted) }
+                    items.forEach { item -> QueueRow(context, item, p) }
                 }
             }
         }
     }
 
     @Composable
-    private fun QueueRow(context: Context, item: WidgetQueueItem, white: ColorProvider, muted: ColorProvider) {
+    private fun QueueRow(context: Context, item: WidgetQueueItem, p: WidgetPalette) {
         // Local tracks jump straight there; a YouTube item only opens the app (it can't play hidden).
         val action = if (item.youtube) openPlayerAction(context)
         else actionRunCallback<SkipToQueueItemAction>(actionParametersOf(SkipToQueueItemAction.UidKey to item.uid, SkipToQueueItemAction.IndexKey to item.index))
         Row(
-            GlanceModifier.fillMaxWidth().height(34.dp).padding(horizontal = 8.dp).cornerRadius(12.dp).background(Color(0x14FFFFFF)).clickable(action),
+            GlanceModifier.fillMaxWidth().height(34.dp).padding(horizontal = 8.dp).cornerRadius(12.dp).background(p.row).clickable(action),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 item.title,
-                style = TextStyle(color = white, fontSize = 13.sp, fontWeight = FontWeight.Medium),
+                style = TextStyle(color = p.rowTitle, fontSize = 13.sp, fontWeight = FontWeight.Medium),
                 maxLines = 1,
                 modifier = GlanceModifier.defaultWeight(),
             )
@@ -122,7 +123,7 @@ class QueueWidget : GlanceAppWidget() {
                 Spacer(GlanceModifier.width(6.dp))
                 // Keep the artist short so the title (which has the weight) always stays readable.
                 val artist = if (item.artist.length > 22) item.artist.take(21).trimEnd() + "…" else item.artist
-                Text("· $artist", style = TextStyle(color = muted, fontSize = 12.sp), maxLines = 1)
+                Text("· $artist", style = TextStyle(color = p.rowBody, fontSize = 12.sp), maxLines = 1)
             }
         }
         Spacer(GlanceModifier.height(2.dp))

@@ -111,7 +111,7 @@ internal class WidgetPalette(
             primaryIcon = null,
         )
 
-        fun materialYou(c: ColorProviders) = WidgetPalette(
+        fun fromColors(c: ColorProviders) = WidgetPalette(
             materialYou = true,
             background = c.widgetBackground,
             title = c.onSurface,
@@ -145,7 +145,7 @@ internal fun WidgetTheme(materialYou: Boolean, content: @Composable () -> Unit) 
     if (materialYou) {
         val colors = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) GlanceTheme.colors else AccentColors
         GlanceTheme(colors = colors) {
-            CompositionLocalProvider(LocalWidgetPalette provides WidgetPalette.materialYou(GlanceTheme.colors)) { content() }
+            CompositionLocalProvider(LocalWidgetPalette provides WidgetPalette.fromColors(GlanceTheme.colors)) { content() }
         }
     } else {
         CompositionLocalProvider(LocalWidgetPalette provides WidgetPalette.Glass) { content() }
@@ -157,14 +157,14 @@ internal fun WidgetTheme(materialYou: Boolean, content: @Composable () -> Unit) 
  * system widget corner radius on Android 12+ (rounded corners aren't supported before that) and
  * applies the content padding.
  */
-internal fun GlanceModifier.widgetRoot(p: WidgetPalette, padding: Dp): GlanceModifier {
+internal fun GlanceModifier.widgetRoot(p: WidgetPalette, contentPadding: Dp): GlanceModifier {
     val base = fillMaxSize().appWidgetBackground().background(p.background)
     val rounded = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         base.cornerRadius(android.R.dimen.system_app_widget_background_radius)
     } else {
         base
     }
-    return rounded.padding(padding)
+    return rounded.padding(contentPadding)
 }
 
 /** Material 3 tonal-spot scheme generated from the app accent #8C7CFF (used before Android 12). */

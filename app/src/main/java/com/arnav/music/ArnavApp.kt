@@ -21,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okio.Path.Companion.toOkioPath
@@ -86,6 +87,11 @@ class ArnavApp : Application(), SingletonImageLoader.Factory {
                 }
             }
             launch { com.arnav.music.core.importer.MatchWorker.ensureScheduled(this@ArnavApp, get()) }
+            // Widgets restyle immediately when the Material You setting changes.
+            launch {
+                settings.settings.map { it.widgetMaterialYou }.distinctUntilChanged().drop(1)
+                    .collect { com.arnav.music.widget.Widgets.refreshAll(this@ArnavApp, it) }
+            }
             get<RemoteConfigRepository>().refresh()
             get<CloudSync>().schedulePeriodic()
         }

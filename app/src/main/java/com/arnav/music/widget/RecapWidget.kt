@@ -6,7 +6,6 @@ import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -19,15 +18,12 @@ import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.actionStartActivity
-import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
 import androidx.glance.appwidget.updateAll
-import androidx.glance.background
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Column
 import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
-import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
 import androidx.glance.layout.padding
@@ -69,21 +65,26 @@ class RecapWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val initial = compute()
         latest.value = initial
+        Widgets.load()
         provideContent {
             val r by latest.collectAsState()
-            Content(context, r ?: initial)
+            val materialYou by Widgets.materialYou.collectAsState()
+            WidgetTheme(materialYou) {
+                Content(context, r ?: initial)
+            }
         }
     }
 
     @Composable
     private fun Content(context: Context, r: WeekRecap) {
         val large = LocalSize.current.height >= 170.dp
-        val white = ColorProvider(Color.White)
-        val muted = ColorProvider(Color(0xB3FFFFFF))
-        val faint = ColorProvider(Color(0x80FFFFFF))
-        val accent = ColorProvider(Color(0xFFB9A6FF))
+        val p = widgetPalette()
+        val white = p.title
+        val muted = p.body
+        val faint = p.faint
+        val accent = p.accent
         val open = actionStartActivity(Intent(Intent.ACTION_VIEW, Uri.parse("arnavmusic://insights"), context, MainActivity::class.java))
-        Column(GlanceModifier.fillMaxSize().cornerRadius(24.dp).background(Color(0xFF15121F)).padding(14.dp).clickable(open)) {
+        Column(GlanceModifier.widgetRoot(p, if (large) p.padding(14.dp) else 14.dp).clickable(open)) {
             Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("YOUR WEEK", style = TextStyle(color = accent, fontSize = 11.sp, fontWeight = FontWeight.Bold), maxLines = 1)
                 Spacer(GlanceModifier.defaultWeight())

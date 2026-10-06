@@ -19,18 +19,14 @@ import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.SizeMode
-import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
 import androidx.glance.appwidget.updateAll
-import androidx.glance.background
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Column
 import androidx.glance.layout.Row
 import androidx.glance.layout.Spacer
-import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
-import androidx.glance.layout.padding
 import androidx.glance.layout.width
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
@@ -78,9 +74,13 @@ class LyricsWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val initial = WidgetBus.lyric.value ?: fallback(context)
+        Widgets.load()
         provideContent {
             val live by WidgetBus.lyric.collectAsState()
-            Content(context, live ?: initial)
+            val materialYou by Widgets.materialYou.collectAsState()
+            WidgetTheme(materialYou) {
+                Content(context, live ?: initial)
+            }
         }
     }
 
@@ -93,14 +93,13 @@ class LyricsWidget : GlanceAppWidget() {
     @Composable
     private fun Content(context: Context, l: WidgetLyric) {
         val tall = LocalSize.current.height >= 170.dp
-        val white = ColorProvider(Color.White)
-        val muted = ColorProvider(Color(0x99FFFFFF))
-        val faint = ColorProvider(Color(0x80FFFFFF))
-        val accent = ColorProvider(Color(0xFFB9A6FF))
-        Column(
-            GlanceModifier.fillMaxSize().cornerRadius(24.dp).background(Color(0xFF15121F)).padding(14.dp)
-                .clickable(openPlayerAction(context)),
-        ) {
+        val p = widgetPalette()
+        val white = p.title
+        // The glass style dims the next line a little more than other secondary text.
+        val muted = if (p.materialYou) p.body else ColorProvider(Color(0x99FFFFFF))
+        val faint = p.faint
+        val accent = p.accent
+        Column(GlanceModifier.widgetRoot(p, if (tall) p.padding(14.dp) else 14.dp).clickable(openPlayerAction(context))) {
             Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("LYRICS", style = TextStyle(color = accent, fontSize = 11.sp, fontWeight = FontWeight.Bold), maxLines = 1)
                 Spacer(GlanceModifier.width(8.dp))
