@@ -97,7 +97,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Publish GitHub Release
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && !contains(github.event.head_commit.message, '[no-release]')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.apk.outputs.version }}
