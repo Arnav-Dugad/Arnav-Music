@@ -39,6 +39,7 @@ class SettingsViewModel(
     private val db: ArnavDatabase,
     private val analytics: Analytics,
     private val intelligence: IntelligenceRepository,
+    val updates: com.arnav.music.core.update.UpdateManager,
 ) : ViewModel() {
     val settings: StateFlow<AppSettings> = settingsRepo.settings
     val budget = perf.budget

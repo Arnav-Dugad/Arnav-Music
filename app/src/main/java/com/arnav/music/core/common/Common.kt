@@ -51,8 +51,9 @@ class NetworkMonitor(context: Context, scope: CoroutineScope) {
 
     fun currentlyOnline(): Boolean {
         val caps = cm?.getNetworkCapabilities(cm.activeNetwork) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        // INTERNET alone: VALIDATED is often missing behind VPNs, private DNS or captive-portal
+        // checks that are blocked, which made the app claim "offline" while requests worked.
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 }
 

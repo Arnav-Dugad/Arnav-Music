@@ -133,6 +133,11 @@ jobs:
           body: |
             **Arnav Music ${{ steps.apk.outputs.version }}** — built from `${{ github.ref_name }}` @ `${{ github.sha }}`.
 
+            ### What's new
+            ${{ github.event.head_commit.message }}
+
+            Installed copies update themselves from this page (Settings → App updates).
+
             ### Install
             1. Download `ArnavMusic-${{ steps.apk.outputs.version }}.apk` below.
             2. Open it on your Android phone (Android 8.0+) and allow "Install unknown apps" for your browser if asked.

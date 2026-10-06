@@ -41,6 +41,14 @@ class ArnavApp : Application(), SingletonImageLoader.Factory {
             val analytics: Analytics = get()
             launch { settings.settings.map { it.analytics }.distinctUntilChanged().collect { analytics.setEnabled(it) } }
             launch { settings.settings.map { it.weeklyRecapNotification }.distinctUntilChanged().collect { com.arnav.music.core.notify.RecapWorker.schedule(this@ArnavApp, it) } }
+            launch {
+                settings.settings.map { it.autoUpdate }.distinctUntilChanged().collect { on ->
+                    com.arnav.music.core.update.UpdateWorker.schedule(this@ArnavApp, on)
+                    // Foreground check on launch (at most every 6 h) so the banner appears promptly.
+                    val updates: com.arnav.music.core.update.UpdateManager = get()
+                    if (on && updates.isDue()) updates.check()
+                }
+            }
             get<RemoteConfigRepository>().refresh()
             get<CloudSync>().schedulePeriodic()
         }

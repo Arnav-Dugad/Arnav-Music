@@ -39,7 +39,20 @@ class AppViewModel(
     private val analytics: Analytics,
     private val localSource: com.arnav.music.core.local.LocalMediaSource,
     private val youtube: com.arnav.music.core.youtube.YouTubeRepository,
+    val updates: com.arnav.music.core.update.UpdateManager,
 ) : ViewModel() {
+    private var downloadJob: kotlinx.coroutines.Job? = null
+
+    fun checkForUpdate() = viewModelScope.launch { updates.check() }
+    fun downloadUpdate(release: com.arnav.music.core.update.ReleaseInfo) {
+        if (downloadJob?.isActive == true) return
+        downloadJob = viewModelScope.launch {
+            if (updates.download(release) && settings.value.autoInstallUpdates) updates.install()
+        }
+    }
+    fun cancelUpdateDownload() { downloadJob?.cancel() }
+    fun installUpdate() = viewModelScope.launch { updates.install() }
+
     val settings: StateFlow<AppSettings> = settingsRepo.settings
     val settingsLoaded: StateFlow<Boolean> = settingsRepo.loaded
     val budget = perf.budget

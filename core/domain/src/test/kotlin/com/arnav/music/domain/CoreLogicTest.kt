@@ -136,5 +136,13 @@ class CoreLogicTest {
         assertEquals("1.2M", Formatters.compactCount(1_200_000))
         assertEquals("Daft Punk" to "Get Lucky", Formatters.splitYouTubeTitle("Daft Punk - Get Lucky (Official Video)", "DaftPunkVEVO"))
         assertEquals("Adele" to "Hello", Formatters.splitYouTubeTitle("Hello", "Adele - Topic"))
+        assertEquals("Aditya Music" to "Narayanamma", Formatters.splitYouTubeTitle("Narayanamma Lyric Video I Aadarsha Kutumbam I Venkatesh, Shriya", "Aditya Music"))
+        assertEquals("T-Series" to "Butta Bomma", Formatters.splitYouTubeTitle("Butta Bomma Full Video Song | Ala Vaikunthapurramuloo", "T-Series"))
+        assertEquals("Sid Sriram" to "Inkem Inkem", Formatters.splitYouTubeTitle("Sid Sriram - Inkem Inkem (Lyrical Video)", "Sid Sriram"))
+        assertEquals("Imagine Dragons" to "Believer", Formatters.splitYouTubeTitle("Imagine Dragons - Believer (Official Music Video)", "ImagineDragonsVEVO"))
+        assertEquals("Backstreet Boys" to "I Want It That Way", Formatters.splitYouTubeTitle("Backstreet Boys - I Want It That Way (Official HD Video)", "Backstreet Boys"))
+        assertEquals("Madonna" to "Music", Formatters.splitYouTubeTitle("Madonna - Music", "Madonna"))
+        assertEquals("6.1 MB", Formatters.bytes(6_075_202))
+        assertEquals("950 B", Formatters.bytes(950))
     }
 }

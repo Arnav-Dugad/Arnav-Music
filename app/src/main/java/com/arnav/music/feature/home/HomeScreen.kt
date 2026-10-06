@@ -109,6 +109,9 @@ fun HomeScreen(vm: HomeViewModel = koinViewModel()) {
         item(key = "ask") {
             Reveal(1) { AskBar { nav.go(Routes.ai()) } }
         }
+        item(key = "update") {
+            com.arnav.music.ui.update.UpdateCard(Modifier.padding(horizontal = Space.gutter, vertical = Space.s))
+        }
         if (!online) item(key = "offline") {
             NoticeBanner(Icons.Rounded.CloudOff, "You're offline. Your library, history and on-device music still work.", Modifier.padding(top = Space.m))
         }

@@ -41,6 +41,8 @@ android {
         buildConfigField("String", "YOUTUBE_API_KEY", "\"${secret("YOUTUBE_API_KEY")}\"")
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${secret("GOOGLE_WEB_CLIENT_ID")}\"")
         buildConfigField("boolean", "FIREBASE_CONFIGURED", hasGoogleServices.toString())
+        // Self-update source: this repository's GitHub Releases (forks update from themselves).
+        buildConfigField("String", "UPDATE_REPO", "\"${System.getenv("GITHUB_REPOSITORY") ?: "Arnav-Dugad/Arnav-Music"}\"")
     }
 
     signingConfigs {

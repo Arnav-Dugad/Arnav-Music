@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SmartDisplay
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -96,7 +97,7 @@ fun SettingsScreen(page: String, vm: SettingsViewModel = koinViewModel()) {
         "appearance" -> "Appearance"; "playback" -> "Playback"; "ai" -> "Arnav AI"; "sources" -> "Sources"
         "privacy" -> "Privacy"; "usage" -> "Usage & quotas"; "about" -> "About"; "accessibility" -> "Accessibility"
         "performance" -> "Performance"; "sync" -> "Data & sync"; "account" -> "Account"; "notifications" -> "Notifications"
-        "developer" -> "Developer"; "library" -> "Library"; else -> "Settings"
+        "developer" -> "Developer"; "library" -> "Library"; "updates" -> "App updates"; else -> "Settings"
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = chrome.calculateBottomPadding() + Space.xl)) {
         item {
@@ -121,6 +122,7 @@ fun SettingsScreen(page: String, vm: SettingsViewModel = koinViewModel()) {
                 "account" -> AccountPage(vm)
                 "notifications" -> NotificationsPage(vm)
                 "library" -> LibraryPage(vm)
+                "updates" -> UpdatesPage(vm)
                 "developer" -> if (BuildConfig.DEBUG) DeveloperPage(vm) else RootPage()
                 else -> RootPage()
             }
@@ -161,6 +163,8 @@ private fun RootPage() {
             NavRow(Icons.Rounded.Accessibility, "Accessibility", "Contrast, transparency, haptics", Color(0xFF52D6C3)) { go("accessibility") }
             Divider()
             NavRow(Icons.Rounded.Bolt, "Performance", "Quality vs battery", Color(0xFFFFC266)) { go("performance") }
+            Divider()
+            NavRow(Icons.Rounded.SystemUpdate, "App updates", "v${BuildConfig.VERSION_NAME} · from GitHub Releases", Color(0xFF8C7CFF)) { go("updates") }
             Divider()
             NavRow(Icons.Rounded.Info, "About", "Version, licenses, attribution", c.contentMuted) { go("about") }
             if (BuildConfig.DEBUG) { Divider(); NavRow(Icons.Rounded.Code, "Developer", "Diagnostics (debug builds only)", c.contentMuted) { go("developer") } }
@@ -526,6 +530,39 @@ private fun DeveloperPage(vm: SettingsViewModel) {
             InfoRow("Firebase configured", BuildConfig.FIREBASE_CONFIGURED.toString())
         }
         SettingsGroup { ActionRowS("Replay onboarding") { vm.resetOnboarding() } }
+    }
+}
+
+@Composable
+private fun UpdatesPage(vm: SettingsViewModel) {
+    val s by vm.settings.collectAsStateWithLifecycle()
+    val c = ArnavTheme.colors
+    val context = LocalContext.current
+    Column {
+        com.arnav.music.ui.update.UpdateCard(Modifier.padding(horizontal = Space.gutter, vertical = Space.s), alwaysShow = true)
+        if (!vm.updates.supported) {
+            Text("Self-update is turned off in debug builds (they're signed with a different key). Install a release build from GitHub.", style = ArnavTheme.type.caption, color = c.contentSubtle, modifier = Modifier.padding(Space.gutter))
+        }
+        SettingsGroup("Automatic updates", footer = "Arnav Music checks GitHub Releases every 6 hours. Each download is checked against its SHA-256 checksum and must be signed with the same key as this app, or it's discarded. On Android 12+ updates can install without a tap once Arnav Music has installed itself once.") {
+            ToggleRow("Check for updates automatically", s.autoUpdate, { v -> vm.update { it.copy(autoUpdate = v) } })
+            Divider()
+            ToggleRow("Download on Wi-Fi only", s.updateWifiOnly, { v -> vm.update { it.copy(updateWifiOnly = v) } }, "Saves mobile data", enabled = s.autoUpdate)
+            Divider()
+            ToggleRow("Install automatically", s.autoInstallUpdates, { v -> vm.update { it.copy(autoInstallUpdates = v) } }, "When the app isn't on screen", enabled = s.autoUpdate)
+        }
+        SettingsGroup("Permission") {
+            InfoRow("Install unknown apps", if (vm.updates.canInstallPackages()) "Allowed" else "Not allowed")
+            InfoRow("Silent updates", if (vm.updates.canInstallSilently()) "Available" else "Needs one confirmed update")
+            if (!vm.updates.canInstallPackages()) {
+                Divider()
+                ActionRowS("Allow Arnav Music to install updates") { runCatching { context.startActivity(vm.updates.unknownSourcesSettingsIntent()) } }
+            }
+        }
+        SettingsGroup {
+            InfoRow("Installed version", "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            Divider()
+            ActionRowS("All releases on GitHub") { open(context, "https://github.com/${BuildConfig.UPDATE_REPO}/releases") }
+        }
     }
 }
 

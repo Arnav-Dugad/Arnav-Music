@@ -361,7 +361,8 @@ private fun YouTubeSurface(engine: YouTubeEngine, modifier: Modifier) {
     val view = remember {
         YouTubePlayerView(context).apply {
             enableAutomaticInitialization = false
-            initialize(engine.listener, true, IFramePlayerOptions.Builder().controls(1).fullscreen(0).rel(0).build())
+            initialize(engine.listener, true, // Origin https://<package> identifies this app to YouTube (required for embeds; avoids error 152/153).
+            IFramePlayerOptions.Builder(context).controls(1).fullscreen(0).rel(0).build())
         }
     }
     DisposableEffect(lifecycle) {

@@ -62,6 +62,10 @@ data class AppSettings(
     val selectedMoods: Set<String> = emptySet(),
     val seedArtists: List<String> = emptyList(),
     val regionCode: String = "",
+    // App updates (GitHub Releases)
+    val autoUpdate: Boolean = true,
+    val updateWifiOnly: Boolean = true,
+    val autoInstallUpdates: Boolean = true,
 )
 
 class SettingsRepository(private val context: Context, scope: CoroutineScope) {
@@ -98,6 +102,9 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
         val moods = stringPreferencesKey("moods")
         val seeds = stringPreferencesKey("seed_artists")
         val region = stringPreferencesKey("region")
+        val autoUpdate = booleanPreferencesKey("auto_update")
+        val updateWifiOnly = booleanPreferencesKey("update_wifi_only")
+        val autoInstall = booleanPreferencesKey("auto_install_updates")
     }
 
     private inline fun <reified E : Enum<E>> Preferences.enum(key: Preferences.Key<String>, default: E): E =
@@ -142,6 +149,9 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
                 selectedMoods = p[K.moods]?.split('|')?.filter { it.isNotBlank() }?.toSet() ?: d.selectedMoods,
                 seedArtists = p[K.seeds]?.split('|')?.filter { it.isNotBlank() } ?: d.seedArtists,
                 regionCode = p[K.region] ?: d.regionCode,
+                autoUpdate = p[K.autoUpdate] ?: d.autoUpdate,
+                updateWifiOnly = p[K.updateWifiOnly] ?: d.updateWifiOnly,
+                autoInstallUpdates = p[K.autoInstall] ?: d.autoInstallUpdates,
             )
         }
         .onEach { _loaded.value = true }
@@ -180,6 +190,9 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
             p[K.moods] = s.selectedMoods.joinToString("|")
             p[K.seeds] = s.seedArtists.joinToString("|")
             p[K.region] = s.regionCode
+            p[K.autoUpdate] = s.autoUpdate
+            p[K.updateWifiOnly] = s.updateWifiOnly
+            p[K.autoInstall] = s.autoInstallUpdates
         }
     }
 

@@ -96,16 +96,17 @@ val appModule = module {
     single { AiGateway(get(), get(), get(), get<ArnavDatabase>().aiCache(), get(), get()) }
     single { IntelligenceRepository(get(), get(), get(), get(), get(), get()) }
     single { YouTubeEngine() }
+    single { com.arnav.music.core.update.UpdateManager(androidContext(), get(), get()) }
     single { PlaybackController(androidContext(), get(), get(), get(), get(), get()) }
 
-    viewModel { AppViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    viewModel { AppViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     viewModel { AuthViewModel(get(), get()) }
     viewModel { HomeViewModel(get(), get(), get(), get()) }
     viewModel { ExploreViewModel(get(), get(), get(), get()) }
     viewModel { LibraryViewModel(get(), get(), get()) }
     viewModel { ArnavAiViewModel(get(), get(), get(), get()) }
     viewModel { InsightsViewModel(get(), get()) }
-    viewModel { SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    viewModel { SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     viewModel { CollectionViewModel(get(), get(), get(), get()) }
     viewModel { com.arnav.music.feature.moments.MomentViewModel(get(), get()) }
 }
