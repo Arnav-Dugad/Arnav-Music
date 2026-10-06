@@ -1,5 +1,8 @@
 package com.arnav.music.feature.home
 
+import com.arnav.music.ui.ArtKeys
+import com.arnav.music.ui.OnTabReselect
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -30,6 +33,7 @@ import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.KeyboardCommandKey
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -84,7 +88,9 @@ fun HomeScreen(vm: HomeViewModel = koinViewModel()) {
     val c = ArnavTheme.colors
     val chrome = LocalChromePadding.current
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = chrome.calculateBottomPadding() + Space.xl)) {
+    val list = rememberLazyListState()
+    OnTabReselect(Routes.HOME) { list.animateScrollToItem(0) }
+    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(bottom = chrome.calculateBottomPadding() + Space.xl)) {
         item(key = "header") {
             Reveal(0) {
                 Row(Modifier.fillMaxWidth().statusBarsPadding().padding(start = Space.gutter, end = Space.s, top = Space.l), verticalAlignment = Alignment.CenterVertically) {
@@ -92,7 +98,7 @@ fun HomeScreen(vm: HomeViewModel = koinViewModel()) {
                         Text(state.greeting + (user?.displayName?.substringBefore(' ')?.let { ", $it" } ?: ""), style = ArnavTheme.type.display, color = c.content,
                             modifier = Modifier.semantics { heading() })
                     }
-                    ArnavIconButton(Icons.Rounded.Search, "Search and commands", nav.openPalette)
+                    ArnavIconButton(Icons.Rounded.KeyboardCommandKey, "Command palette", nav.openPalette)
                     Box(
                         Modifier.size(Space.touch).clip(CircleShape).clickable(role = Role.Button, onClickLabel = "Profile") { nav.go(Routes.PROFILE) },
                         contentAlignment = Alignment.Center,
@@ -106,8 +112,8 @@ fun HomeScreen(vm: HomeViewModel = koinViewModel()) {
                 }
             }
         }
-        item(key = "ask") {
-            Reveal(1) { AskBar { nav.go(Routes.ai()) } }
+        item(key = "search") {
+            Reveal(1) { SearchBar { nav.go(Routes.search()) } }
         }
         item(key = "update") {
             com.arnav.music.ui.update.UpdateCard(Modifier.padding(horizontal = Space.gutter, vertical = Space.s))
@@ -166,7 +172,7 @@ private fun Section(section: HomeSection, play: (List<Track>, Int, Boolean) -> U
             Spacer(Modifier.height(Space.m))
             LazyRow(contentPadding = PaddingValues(horizontal = Space.gutter), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                 items(section.mixes, key = { it.kind.name }) { mix ->
-                    MixCard(mix.kind.title, mix.kind.blurb, mix.artwork, mix.kind.name, { nav.go(Routes.collection(CollectionKind.SMART, mix.kind.name)) })
+                    MixCard(mix.kind.title, mix.kind.blurb, mix.artwork, mix.kind.name, { nav.go(Routes.collection(CollectionKind.SMART, mix.kind.name)) }, sharedKey = ArtKeys.smart(mix.kind.name))
                 }
             }
         }
@@ -258,21 +264,22 @@ private fun TimeMachineCard(section: HomeSection.TimeMachine, onPlay: () -> Unit
     }
 }
 
+/** A plain search field (songs, artists, playlists). It opens Search with the keyboard up. */
 @Composable
-private fun AskBar(onClick: () -> Unit) {
+private fun SearchBar(onClick: () -> Unit) {
     val c = ArnavTheme.colors
     val interaction = rememberInteraction()
     Row(
         Modifier.padding(horizontal = Space.gutter, vertical = Space.m).fillMaxWidth().height(52.dp)
             .pressScale(interaction, 0.98f)
             .glass(GlassMaterial.Thin, CircleShape)
-            .clickable(interaction, indication = null, role = Role.Button, onClickLabel = "Ask Arnav AI", onClick = onClick)
+            .clickable(interaction, indication = null, role = Role.Button, onClickLabel = "Search", onClick = onClick)
             .padding(horizontal = Space.l),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Rounded.AutoAwesome, null, tint = c.accent, modifier = Modifier.size(20.dp))
+        Icon(Icons.Rounded.Search, null, tint = c.contentMuted, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(Space.m))
-        Text("Ask for a feeling, a moment, a session…", style = ArnavTheme.type.body, color = c.contentSubtle, maxLines = 1)
+        Text("Songs, artists, playlists", style = ArnavTheme.type.body, color = c.contentSubtle, maxLines = 1)
     }
 }
 

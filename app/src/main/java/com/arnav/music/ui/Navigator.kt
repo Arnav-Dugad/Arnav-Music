@@ -5,6 +5,8 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import com.arnav.music.domain.model.Track
 import com.arnav.music.ui.player.SheetRequest
 
@@ -17,7 +19,12 @@ class Navigator(
     val share: (Track) -> Unit,
     /** Opens Now Playing with the artwork flying from [bounds] (root coordinates, px). */
     val flyFrom: (androidx.compose.ui.geometry.Rect) -> Unit = {},
+    /** Called before a tab switch: collapses the player and closes sheets/overlays. */
+    private val beforeTopLevel: () -> Unit = {},
 ) {
+    private val _reselect = MutableSharedFlow<String>(extraBufferCapacity = 4)
+    /** Emits a tab's route when its button is tapped while already on that tab's root (scroll to top). */
+    val reselect: SharedFlow<String> = _reselect
     private var lastRoute: String? = null
     private var lastAt = 0L
 
@@ -33,14 +40,34 @@ class Navigator(
         nav.navigate(route)
     }
     fun back() { if (!nav.popBackStack()) Unit }
-    fun topLevel(route: String) = nav.navigate(route) {
-        popUpTo(nav.graph.findStartDestination().id) { saveState = true }
-        launchSingleTop = true
-        restoreState = true
+    /**
+     * Tab buttons always land on the tab's root, wherever you are: sub-pages are cleared (no
+     * restored deep state) and the player/sheets get out of the way. Tapping the current tab's
+     * root again scrolls it to the top.
+     */
+    fun topLevel(route: String) {
+        beforeTopLevel()
+        val target = route.substringBefore('?')
+        if (nav.currentDestination?.route?.substringBefore('?') == target) {
+            _reselect.tryEmit(target)
+            return
+        }
+        lastRoute = null
+        nav.navigate(target) {
+            popUpTo(nav.graph.findStartDestination().id)
+            launchSingleTop = true
+        }
     }
 }
 
 val LocalNavigator = staticCompositionLocalOf<Navigator> { error("Navigator not provided") }
+/** Scrolls [scrollToTop] whenever the tab [route] is reselected in the navigation bar. */
+@androidx.compose.runtime.Composable
+fun OnTabReselect(route: String, scrollToTop: suspend () -> Unit) {
+    val nav = LocalNavigator.current
+    androidx.compose.runtime.LaunchedEffect(nav, route) { nav.reselect.collect { if (it == route.substringBefore('?')) scrollToTop() } }
+}
+
 val LocalAppViewModel = staticCompositionLocalOf<AppViewModel> { error("AppViewModel not provided") }
 /** Space reserved at the bottom of scrolling content for the MorphBar + navigation chrome. */
 val LocalChromePadding = staticCompositionLocalOf { PaddingValues(bottom = 160.dp) }

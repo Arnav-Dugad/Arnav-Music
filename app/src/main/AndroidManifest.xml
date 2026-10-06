@@ -92,6 +92,39 @@
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/arnav_widget_info" />
         </receiver>
 
+        <receiver
+            android:name=".widget.QueueWidgetReceiver"
+            android:exported="true"
+            android:label="Arnav Music · Up next">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/arnav_queue_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.RecapWidgetReceiver"
+            android:exported="true"
+            android:label="Arnav Music · Your week">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/arnav_recap_widget_info" />
+        </receiver>
+
+        <!-- Quick Settings tile: toggles on-device playback; opens the app for YouTube. -->
+        <service
+            android:name=".core.system.PlaybackTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_music"
+            android:label="@string/tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data android:name="android.service.quicksettings.TOGGLEABLE_TILE" android:value="true" />
+        </service>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.shares"

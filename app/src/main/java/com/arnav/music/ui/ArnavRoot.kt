@@ -1,6 +1,8 @@
 package com.arnav.music.ui
 
-import android.Manifest
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -122,7 +124,7 @@ private val destinations = listOf(
 )
 
 @Composable
-fun ArnavAppRoot(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled: () -> Unit, openPlayer: Boolean, onOpenPlayerHandled: () -> Unit) {
+fun ArnavAppRoot(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled: () -> Unit, openPlayer: Boolean, onOpenPlayerHandled: () -> Unit, pip: Boolean = false) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val budget by vm.budget.collectAsStateWithLifecycle()
     val state by vm.playerState.collectAsStateWithLifecycle()
@@ -141,13 +143,13 @@ fun ArnavAppRoot(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled: () ->
             OnboardingScreen(vm)
             return@ArnavMusicTheme
         }
-        AppScaffold(vm, deepLink, onDeepLinkHandled, openPlayer, onOpenPlayerHandled)
+        AppScaffold(vm, deepLink, onDeepLinkHandled, openPlayer, onOpenPlayerHandled, pip)
     }
     }
 }
 
 @Composable
-private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled: () -> Unit, openPlayer: Boolean, onOpenPlayerHandled: () -> Unit) {
+private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled: () -> Unit, openPlayer: Boolean, onOpenPlayerHandled: () -> Unit, pip: Boolean) {
     val c = ArnavTheme.colors
     val motion = ArnavTheme.motion
     val nav = rememberNavController()
@@ -163,6 +165,7 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
     val expand = remember { Animatable(0f) }
     var sheet by remember { mutableStateOf<SheetRequest?>(null) }
     var launchOrigin by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    var dockRect by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     var paletteOpen by rememberSaveable { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val palette = com.arnav.music.ui.theme.LocalArtworkPalette.current ?: com.arnav.music.domain.color.ArtworkPalette.neutral(surfaceMode(settings))
@@ -179,6 +182,11 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
                     launchOrigin = bounds
                     scope.launch { expand.snapTo(0f); expand.animateTo(1f, motion.cinematic()) }
                 }
+            },
+            beforeTopLevel = {
+                sheet = null
+                paletteOpen = false
+                if (expand.targetValue > 0f) scope.launch { expand.animateTo(0f, motion.cinematic()) }
             },
         )
     }
@@ -213,8 +221,25 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
         }
     }
 
+    // System bar icons follow what's actually behind them: the app theme, or the player's artwork backdrop.
+    val view = androidx.compose.ui.platform.LocalView.current
+    val playerOpen by remember { androidx.compose.runtime.derivedStateOf { expand.value > 0.5f } }
+    val darkIcons = if (playerOpen && state.current != null) Color(palette.backdrop).luminance() > 0.5f else c.background.luminance() > 0.5f
+    LaunchedEffect(darkIcons) {
+        val window = (view.context as? android.app.Activity)?.window ?: return@LaunchedEffect
+        androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
+            isAppearanceLightStatusBars = darkIcons
+            isAppearanceLightNavigationBars = darkIcons
+        }
+    }
+
     val backStack by nav.currentBackStackEntryAsState()
     val currentRoute = backStack?.destination?.route
+    // The highlighted tab is the tab whose root sits under the current screen (Home otherwise),
+    // so sub-pages like a playlist keep their tab lit.
+    val selectedTab = remember(backStack) {
+        Routes.topLevel.lastOrNull { r -> r != Routes.HOME && runCatching { nav.getBackStackEntry(r) }.isSuccess } ?: Routes.HOME
+    }
 
     CompositionLocalProvider(LocalNavigator provides navigator, LocalAppViewModel provides vm) {
         BoxWithConstraints(
@@ -227,30 +252,38 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
                 },
         ) {
             val wide = maxWidth >= 720.dp
+            // Big tablets / desktop windows: library, queue and Now Playing side by side.
+            val studio = wide && maxWidth >= 1000.dp && !pip
             val railWidth = if (wide) 88.dp else 0.dp
             val navBarInset = with(density) { WindowInsets.navigationBars.getBottom(density).toDp() }
             val bottomNavHeight = if (wide) 0.dp else 68.dp
             val hasPlayer = state.current != null
             val barBottom = maxHeight - navBarInset - bottomNavHeight - (if (wide) 16.dp else 6.dp)
-            val chromeBottom = navBarInset + bottomNavHeight + (if (hasPlayer) (if (state.current?.source == SourceType.YOUTUBE) 120.dp else 92.dp) else 16.dp)
+            val chromeBottom = navBarInset + bottomNavHeight + (if (hasPlayer && !studio) (if (state.current?.source == SourceType.YOUTUBE) 120.dp else 92.dp) else 16.dp)
 
             CompositionLocalProvider(LocalChromePadding provides PaddingValues(bottom = chromeBottom)) {
                 Row(Modifier.fillMaxSize()) {
-                    if (wide) NavRail(currentRoute, onSelect = { navigator.topLevel(it) }, onSettings = { navigator.go(Routes.settings()) })
+                    if (wide) NavRail(selectedTab, onSelect = { navigator.topLevel(it) }, onSettings = { navigator.go(Routes.settings()) })
                     Box(Modifier.weight(1f).fillMaxHeight()) {
                         AppNavHost(nav)
+                    }
+                    val current = state.current
+                    if (studio && current != null) {
+                        StudioPane(
+                            track = current, state = state, progress = progress, liked = current.id in liked,
+                            onArtBounds = { dockRect = it },
+                            onExpand = { scope.launch { expand.animateTo(1f, motion.cinematic()) } },
+                            togglePlay = vm.player::togglePlay, next = vm.player::next, previous = vm.player::previous,
+                            toggleLike = { vm.toggleLike(it) },
+                            openArtist = { navigator.go(Routes.artist(it)) },
+                            queue = { QueuePanel(state, vm.player::move, vm.player::removeAt, { vm.player.skipTo(it) }, { vm.saveQueueAsPlaylist() }, {}) },
+                        )
                     }
                 }
             }
 
-            if (!wide) {
-                BottomBar(
-                    currentRoute, onSelect = { r ->
-                        if (r == currentRoute?.substringBefore('?') || (r == Routes.AI && currentRoute == Routes.AI)) Unit
-                        navigator.topLevel(r)
-                    },
-                    modifier = Modifier.align(Alignment.BottomCenter),
-                )
+            if (!wide && !pip) {
+                BottomBar(selectedTab, onSelect = { r -> navigator.topLevel(r) }, modifier = Modifier.align(Alignment.BottomCenter))
             }
 
             if (hasPlayer) {
@@ -272,6 +305,8 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
                         skipTo = { vm.player.skipTo(it) },
                     ),
                     switchingVariant = switching,
+                    pip = pip,
+                    dockRect = if (studio) dockRect else null,
                     launchOrigin = launchOrigin,
                     onLaunchConsumed = { launchOrigin = null },
                     queueContent = { close ->
@@ -280,7 +315,7 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
                 )
             }
 
-            SnackbarHost(
+            if (!pip) SnackbarHost(
                 snackbar,
                 Modifier.align(Alignment.BottomCenter).padding(bottom = chromeBottom + 8.dp).padding(horizontal = Space.gutter),
             ) { data ->
@@ -295,7 +330,7 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
                 }
             }
 
-            AnimatedVisibility(paletteOpen, enter = fadeIn(motion.fast()) + scaleIn(motion.expressive(), 0.97f), exit = fadeOut(motion.fast()) + scaleOut(motion.fast(), 0.98f)) {
+            AnimatedVisibility(paletteOpen && !pip, enter = fadeIn(motion.fast()) + scaleIn(motion.expressive(), 0.97f), exit = fadeOut(motion.fast()) + scaleOut(motion.fast(), 0.98f)) {
                 CommandPalette(onDismiss = { paletteOpen = false })
             }
         }
@@ -323,11 +358,11 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
 }
 
 @Composable
-private fun BottomBar(currentRoute: String?, onSelect: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun BottomBar(selectedTab: String, onSelect: (String) -> Unit, modifier: Modifier = Modifier) {
     val c = ArnavTheme.colors
     val motion = ArnavTheme.motion
     val haptics = ArnavTheme.haptics
-    val selectedIndex = destinations.indexOfFirst { d -> currentRoute?.substringBefore('?') == d.route.substringBefore('?') }
+    val selectedIndex = destinations.indexOfFirst { d -> d.route == selectedTab }
     Box(
         modifier
             .fillMaxWidth()
@@ -368,7 +403,7 @@ private fun BottomBar(currentRoute: String?, onSelect: (String) -> Unit, modifie
 }
 
 @Composable
-private fun NavRail(currentRoute: String?, onSelect: (String) -> Unit, onSettings: () -> Unit) {
+private fun NavRail(selectedTab: String, onSelect: (String) -> Unit, onSettings: () -> Unit) {
     val c = ArnavTheme.colors
     val haptics = ArnavTheme.haptics
     Column(
@@ -378,7 +413,7 @@ private fun NavRail(currentRoute: String?, onSelect: (String) -> Unit, onSetting
         ArnavMark(Modifier.size(36.dp))
         Spacer(Modifier.height(Space.xxl))
         destinations.forEach { d ->
-            val selected = currentRoute?.substringBefore('?') == d.route.substringBefore('?')
+            val selected = d.route == selectedTab
             Column(
                 Modifier.padding(vertical = Space.s).clip(RoundedCornerShape(Radius.m))
                     .clickable(role = Role.Tab) { haptics.navigate(); onSelect(d.route.substringBefore('?')) }

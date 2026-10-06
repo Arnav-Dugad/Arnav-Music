@@ -1,5 +1,8 @@
 package com.arnav.music.feature.ai
 
+import com.arnav.music.ui.Routes
+import com.arnav.music.ui.OnTabReselect
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -114,7 +117,9 @@ fun ArnavAiScreen(initialQuery: String, vm: ArnavAiViewModel = koinViewModel()) 
 
     Box(Modifier.fillMaxSize()) {
         AiAura(Modifier.fillMaxWidth().height(360.dp))
-        LazyColumn(Modifier.fillMaxSize().imePadding(), contentPadding = PaddingValues(bottom = chrome.calculateBottomPadding() + Space.xl)) {
+        val list = rememberLazyListState()
+        OnTabReselect(Routes.AI) { list.animateScrollToItem(0) }
+        LazyColumn(Modifier.fillMaxSize().imePadding(), state = list, contentPadding = PaddingValues(bottom = chrome.calculateBottomPadding() + Space.xl)) {
             item {
                 Column(Modifier.statusBarsPadding().padding(horizontal = Space.gutter).padding(top = Space.l)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {

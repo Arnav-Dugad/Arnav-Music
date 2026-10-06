@@ -13,11 +13,27 @@ import com.arnav.music.ui.DeepLink
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.android.ext.android.inject
 import com.arnav.music.core.settings.SettingsRepository
+import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.os.Build
+import androidx.lifecycle.lifecycleScope
+import com.arnav.music.core.playback.PlaybackController
+import com.arnav.music.domain.model.SourceType
+import com.arnav.music.ui.pip.Pip
+import com.arnav.music.ui.pip.PipSpec
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val settingsRepo: SettingsRepository by inject()
     private val deepLink = mutableStateOf<DeepLink?>(null)
     private val openPlayer = mutableStateOf(false)
+    private val player: PlaybackController by inject()
+    /** True while the app is shown as the floating picture-in-picture player. */
+    private val inPip = mutableStateOf(false)
+    private var pipSpec = PipSpec(enabled = false, playing = false, video = false, hasNext = false)
+    private val pipSupported by lazy { Build.VERSION.SDK_INT >= 26 && packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
@@ -26,6 +42,21 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) handle(intent)
+        if (pipSupported) {
+            lifecycleScope.launch {
+                combine(player.state, settingsRepo.settings) { st, set ->
+                    PipSpec(
+                        enabled = set.floatingPlayer && st.isPlaying && st.current != null,
+                        playing = st.isPlaying,
+                        video = st.current?.source == SourceType.YOUTUBE,
+                        hasNext = st.queue.hasNext,
+                    )
+                }.distinctUntilChanged().collect { spec ->
+                    pipSpec = spec
+                    if (Build.VERSION.SDK_INT >= 26) runCatching { setPictureInPictureParams(Pip.params(this@MainActivity, spec)) }
+                }
+            }
+        }
         setContent {
             val vm: AppViewModel = koinViewModel()
             ArnavAppRoot(
@@ -34,8 +65,22 @@ class MainActivity : ComponentActivity() {
                 onDeepLinkHandled = { deepLink.value = null },
                 openPlayer = openPlayer.value,
                 onOpenPlayerHandled = { openPlayer.value = false },
+                pip = inPip.value,
             )
         }
+    }
+
+    /** Android 8–11: enter the floating player when the user leaves mid-song (12+ auto-enters via params). */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (pipSupported && Build.VERSION.SDK_INT in 26..30 && pipSpec.enabled) {
+            runCatching { enterPictureInPictureMode(Pip.params(this, pipSpec)) }
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        inPip.value = isInPictureInPictureMode
     }
 
     override fun onNewIntent(intent: Intent) {

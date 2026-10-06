@@ -48,6 +48,8 @@ fun LivingBackdrop(
     gyro: Boolean,
     modifier: Modifier = Modifier,
     intensity: Float = 1f,
+    /** 0..1 beat pulse for analyzed on-device songs; read during drawing only (no recomposition). */
+    pulse: () -> Float = { 0f },
 ) {
     val budget = ArnavTheme.budget
     val colors = ArnavTheme.colors
@@ -71,10 +73,13 @@ fun LivingBackdrop(
             drawRect(Brush.verticalGradient(listOf(base, second)))
             val w = size.width; val h = size.height
             val px = tilt.first * 24.dp.toPx(); val py = tilt.second * 24.dp.toPx()
-            val a = accent.copy(alpha = (if (colors.isOled) 0.10f else 0.22f) * intensity)
+            // The beat breathes the light: a few percent of size and glow, never a flash.
+            val beat = pulse().coerceIn(0f, 1f)
+            val a = accent.copy(alpha = ((if (colors.isOled) 0.10f else 0.22f) * intensity * (1f + 0.45f * beat)).coerceAtMost(1f))
+            val ra = w * 0.9f * (1f + 0.07f * beat)
             drawCircle(
-                Brush.radialGradient(listOf(a, Color.Transparent), center = Offset(w * (0.25f + 0.08f * cos(t)) + px, h * (0.22f + 0.05f * sin(t * 1.3f)) + py), radius = w * 0.9f),
-                radius = w * 0.9f, center = Offset(w * (0.25f + 0.08f * cos(t)) + px, h * (0.22f + 0.05f * sin(t * 1.3f)) + py),
+                Brush.radialGradient(listOf(a, Color.Transparent), center = Offset(w * (0.25f + 0.08f * cos(t)) + px, h * (0.22f + 0.05f * sin(t * 1.3f)) + py), radius = ra),
+                radius = ra, center = Offset(w * (0.25f + 0.08f * cos(t)) + px, h * (0.22f + 0.05f * sin(t * 1.3f)) + py),
             )
             val b = Color(palette.dominant).copy(alpha = (if (colors.isOled) 0.06f else 0.16f) * intensity)
             drawCircle(

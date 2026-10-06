@@ -203,6 +203,10 @@ private fun AppearancePage(vm: SettingsViewModel) {
                 subtitle = "Slow light and colour drift behind the player")
             Divider()
             ToggleRow("Tilt parallax", s.gyroParallax, { v -> vm.update { it.copy(gyroParallax = v) } }, "Very subtle depth when you tilt your phone")
+            Divider()
+            ToggleRow("Beat-synced light", s.beatVisuals, { v -> vm.update { it.copy(beatVisuals = v) } }, "Songs on this phone: the backdrop breathes gently with the beat once analyzed. Never flashes")
+            Divider()
+            ToggleRow("Ambient edge glow", s.ambientEdgeGlow, { v -> vm.update { it.copy(ambientEdgeGlow = v) } }, "OLED theme: after 8 s idle in Now Playing the screen sinks to black with a hairline of progress light around the edge")
         }
     }
 }
@@ -250,6 +254,9 @@ private fun PlaybackPage(vm: SettingsViewModel) {
                         .putExtra(AudioEffect.EXTRA_CONTENT_TYPE, AudioEffect.CONTENT_TYPE_MUSIC))
                 }
             }
+        }
+        SettingsGroup("Floating player", footer = "Leaving the app mid-song shrinks the player into a small window above other apps. YouTube keeps playing only while that window is visible; closing it stops playback.") {
+            ToggleRow("Picture-in-picture", s.floatingPlayer, { v -> vm.update { it.copy(floatingPlayer = v) } }, "Play, pause and skip right from the window")
         }
         SettingsGroup("YouTube", footer = "Song plays the official audio upload (\"Topic\" art track) and Video plays the music video — switch any time in Now Playing. YouTube always plays in its official embedded player, which stays visible; for background listening continue in YouTube Music.") {
             ToggleRow("Prefer music videos", s.preferVideos, { v -> vm.update { it.copy(preferVideos = v) } }, "Off: songs first, like YouTube Music")
@@ -334,6 +341,19 @@ private fun LibraryPage(vm: SettingsViewModel) {
             Divider()
             ActionRowS("Manage permission in system settings") {
                 runCatching { context.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + context.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            }
+        }
+        SettingsGroup("Audio analysis", footer = "Measures tempo, loudness and energy of songs on this phone, on this phone. Powers beat-synced light, energy-aware ordering and the BPM shown for each song. Nothing is uploaded.") {
+            val s by vm.settings.collectAsStateWithLifecycle()
+            val dao = org.koin.compose.koinInject<com.arnav.music.core.db.ArnavDatabase>().audioFeatures()
+            val analyzedFlow = androidx.compose.runtime.remember(dao) { dao.analyzedCount() }
+            val analyzed by analyzedFlow.collectAsStateWithLifecycle(initialValue = 0)
+            ToggleRow("Analyze while charging", s.analyzeLocalAudio, { v -> vm.update { it.copy(analyzeLocalAudio = v) } }, "Runs quietly in the background, only when plugged in")
+            Divider()
+            InfoRow("Songs analyzed", "$analyzed")
+            Divider()
+            ActionRowS("Analyze now", "Starts right away (battery not low)", enabled = app.hasLocalPermission()) {
+                com.arnav.music.core.analysis.AnalysisWorker.runNow(context)
             }
         }
         SettingsGroup("Offline cache", footer = "Saved search pages, artwork and metadata make Arnav Music fast and quota-friendly.") {

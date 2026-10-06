@@ -35,23 +35,36 @@ class ArnavApp : Application(), SingletonImageLoader.Factory {
         }
         // Cloud work is deferred off the launch path; the UI never waits on Firebase.
         val scope: CoroutineScope = get()
-        // Keep the home-screen widget in sync with playback (debounced; main thread for the player).
+        // Keep the home-screen widgets in sync with playback (debounced; main thread for the player).
+        // Widgets only ever render this snapshot; they never start YouTube playback.
         scope.launch {
             val player: com.arnav.music.core.playback.PlaybackController = get()
             player.state
-                .map { s -> listOf(s.current?.id?.value, s.current?.title, s.isPlaying, s.queue.hasNext) to s }
+                .map { s ->
+                    listOf(
+                        s.current?.id?.value, s.current?.title, s.isPlaying, s.queue.hasNext,
+                        com.arnav.music.widget.WidgetQueueItem.key(s.queue),
+                    ) to s
+                }
                 .distinctUntilChanged { a, b -> a.first == b.first }
                 .debounce(400)
                 .collect { (_, s) ->
                     val t = s.current
+                    val upNext = com.arnav.music.widget.WidgetQueueItem.upNext(s.queue)
                     launch(Dispatchers.IO) {
                         com.arnav.music.widget.ArnavWidget.refresh(
                             this@ArnavApp, t?.title, t?.artist, t?.artworkUrl, s.isPlaying,
-                            t?.source == com.arnav.music.domain.model.SourceType.YOUTUBE, s.queue.hasNext,
+                            t?.source == com.arnav.music.domain.model.SourceType.YOUTUBE, s.queue.hasNext, upNext,
                         )
                     }
                 }
         }
+        // Refresh the "Your week" widget whenever the app goes to the background (no-op when not placed).
+        androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
+            override fun onStop(owner: androidx.lifecycle.LifecycleOwner) {
+                scope.launch(Dispatchers.IO) { runCatching { com.arnav.music.widget.RecapWidget.refresh(this@ArnavApp) } }
+            }
+        })
         scope.launch(Dispatchers.Default) {
             val gate: FirebaseGate = get()
             gate.ensure()
@@ -59,6 +72,7 @@ class ArnavApp : Application(), SingletonImageLoader.Factory {
             val analytics: Analytics = get()
             launch { settings.settings.map { it.analytics }.distinctUntilChanged().collect { analytics.setEnabled(it) } }
             launch { settings.settings.map { it.weeklyRecapNotification }.distinctUntilChanged().collect { com.arnav.music.core.notify.RecapWorker.schedule(this@ArnavApp, it) } }
+            launch { settings.settings.map { it.analyzeLocalAudio }.distinctUntilChanged().collect { com.arnav.music.core.analysis.AnalysisWorker.schedule(this@ArnavApp, it) } }
             launch {
                 settings.settings.map { it.autoUpdate }.distinctUntilChanged().collect { on ->
                     com.arnav.music.core.update.UpdateWorker.schedule(this@ArnavApp, on)

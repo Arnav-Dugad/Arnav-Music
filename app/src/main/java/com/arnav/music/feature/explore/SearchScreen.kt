@@ -103,8 +103,11 @@ fun SearchScreen(initialQuery: String, vm: ExploreViewModel = koinViewModel()) {
 
     LaunchedEffect(Unit) {
         if (initialQuery.isNotBlank() && vm.query.value.isBlank()) vm.query.value = initialQuery
-        if (initialQuery.isBlank()) runCatching { focus.requestFocus() }
+        // Wait for the screen's enter transition so the keyboard rises smoothly instead of racing it.
+        if (initialQuery.isBlank()) { kotlinx.coroutines.delay(120); runCatching { focus.requestFocus() } }
     }
+    // Scrolling results means you're reading, not typing: get the keyboard out of the way.
+    LaunchedEffect(listState.isScrollInProgress) { if (listState.isScrollInProgress) keyboard?.hide() }
     // Paging: ask for the next page when the user nears the end of the list.
     LaunchedEffect(listState) {
         snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index to listState.layoutInfo.totalItemsCount }
@@ -124,7 +127,7 @@ fun SearchScreen(initialQuery: String, vm: ExploreViewModel = koinViewModel()) {
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = { vm.submit(); keyboard?.hide() }),
                     modifier = Modifier.weight(1f).focusRequester(focus),
-                    decorationBox = { inner -> if (query.isEmpty()) Text("What do you want to hear?", style = ArnavTheme.type.body, color = c.contentSubtle); inner() },
+                    decorationBox = { inner -> if (query.isEmpty()) Text("Songs, artists, playlists", style = ArnavTheme.type.body, color = c.contentSubtle); inner() },
                 )
                 if (query.isNotEmpty()) ArnavIconButton(Icons.Rounded.Close, "Clear", { vm.query.value = "" }, tint = c.contentSubtle, size = 18.dp)
             }
@@ -140,7 +143,7 @@ fun SearchScreen(initialQuery: String, vm: ExploreViewModel = koinViewModel()) {
                 if (recent.isNotEmpty()) {
                     item { Label("Recent searches") }
                     items(recent, key = { "r_$it" }) { r ->
-                        Row(Modifier.fillMaxWidth().clickable { vm.query.value = r }.padding(start = Space.gutter, end = Space.s, top = Space.xs, bottom = Space.xs), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.fillMaxWidth().clickable { vm.query.value = r; vm.submit(); keyboard?.hide() }.padding(start = Space.gutter, end = Space.s, top = Space.xs, bottom = Space.xs), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Rounded.History, null, tint = c.contentSubtle, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(Space.m))
                             Text(r, style = ArnavTheme.type.body, color = c.content, modifier = Modifier.weight(1f))

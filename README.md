@@ -74,6 +74,19 @@ Everything around playback — library, history, recommendations, Taste DNA, Mom
 - **Circular theme reveal**: switching theme or glass mode expands the new look from your finger.
 - **Home-screen widget**: artwork, title and play/skip, plus *Ask Arnav AI* and *Moments* shortcuts. It resizes with its cell size.
 - **Import from YouTube**: Library → ☁︎ copies your YouTube playlists and *Liked videos* into Arnav playlists, with live progress. It uses read-only access, and the token never leaves memory.
+- **Lyrics, Apple Music style**: big time-synced lines that glide into place with a gentle cascade, word-by-word fill for enhanced LRC, breathing dots through instrumental breaks, tap a line to jump there. The cover tucks into the corner while lyrics are open. Sources: lyrics embedded in your own files (ID3 USLT/SYLT, FLAC, MP4), `.lrc`/`.txt` files you import, or text you paste. Nothing is copied from websites.
+- **Tabs always take you home**: tapping a tab always lands on its main page, clearing sub-pages, collapsing the player and closing sheets. Tapping the current tab again scrolls to the top.
+- **Plain search on Home**: the Home bar is a normal song/artist/playlist search; Arnav AI lives in its own tab.
+- **Floating player (picture-in-picture)**: leave the app mid-song and the player shrinks into a window with play/pause/skip. YouTube keeps playing only while that window is visible.
+- **Studio layout for tablets**: navigation rail, your library, and a docked Now Playing + Up Next pane side by side.
+- **Artwork that travels**: playlist and mix covers grow into their page's hero (shared-element transitions), and Home cards fly into the player.
+- **Ambient edge glow (OLED)**: an idle Now Playing screen sinks to black, with a hairline of progress light running around the screen's rounded edge.
+- **Motion details**: depth-swap track changes (the old cover sinks and blurs, the new one rises), a play/pause glyph that morphs between shapes, a heart that fills from its centre, a springy bounce at the ends of the queue, predictive-back previews, and haptic ticks while scrubbing.
+- **Beat-synced light**: songs on your phone are analyzed on device for tempo, loudness and energy. The Now Playing light then breathes with the beat (capped well below flashing rates), and energy-aware features use real measurements instead of estimates.
+- **Streaks & milestones** in Insights: current and longest listening streak, plus milestones like your first 1,000 minutes or 100 artists. There are no reminders or nags.
+- **Import from Spotify or CSV**: pick your Spotify data export (`.zip`/`.json`) or any CSV. Songs are matched against music on your phone first, then against YouTube. Official "Topic" uploads are preferred, and matching stays under the free daily quota.
+- **YouTube playlist re-sync**: refresh imported YouTube playlists on demand. They also refresh quietly once a day when Google already allows it.
+- **Widgets & system**: Now Playing, Up Next (queue) and Your Week widgets, all lock-screen capable where Android supports it. Also a Quick Settings tile, a Like button in the media notification/lock screen, and a themed (monochrome) icon.
 
 **Everything else**
 - Home composed from ≤8 prioritised sections (time-of-day aware); never an empty first launch.
@@ -208,7 +221,8 @@ Arnav Music **does not**: extract stream URLs, use yt-dlp or similar, separate a
 - YouTube playback stops when the app is backgrounded (by design; one-tap handoff to YouTube Music).
 - With App Check **enforced** on AI Logic, APKs installed from GitHub (not Google Play) usually fail Play Integrity attestation, so Gemini is blocked and Arnav AI uses its on-device engine. Unenforce AI Logic in App Check to allow cloud AI for sideloaded installs, or distribute through Google Play.
 - “Energy” and “style” hints for YouTube tracks are estimated from public titles/tags and are labelled as estimates.
-- Lyrics show an empty state until a licensed lyrics provider is added.
+- Lyrics appear for songs whose files embed them, or once you import/paste them. There's no free licensed online lyrics provider, so streaming tracks start without lyrics.
+- Google's At a Glance doesn't accept third-party content, so Arnav Music can't place a card there.
 - No ReplayGain/loudness normalisation (not reliably supported by Media3 across devices); fades and skip-silence are provided instead.
 - Baseline profile is hand-written; a generated profile (Macrobenchmark) is on the roadmap.
 - YouTube Music's own *Liked music* list isn't exposed by the YouTube Data API. Import brings over *Liked videos* and your playlists instead.

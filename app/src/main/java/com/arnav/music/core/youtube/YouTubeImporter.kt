@@ -3,6 +3,7 @@ package com.arnav.music.core.youtube
 import com.arnav.music.core.diagnostics.UsageMeter
 import com.arnav.music.core.repo.LibraryRepository
 import com.arnav.music.domain.model.Track
+import com.arnav.music.domain.provider.MusicError
 import com.arnav.music.domain.quota.YouTubeCosts
 
 /** A playlist on the signed-in user's YouTube account. */
@@ -24,6 +25,9 @@ data class ImportProgress(
 )
 
 data class ImportSummary(val playlists: Int, val tracks: Int, val skipped: Int)
+
+/** [missing]: gone from YouTube, no longer readable, or empty, so left as they were. */
+data class RefreshSummary(val playlists: Int, val tracks: Int, val skipped: Int, val missing: Int)
 
 /**
  * Copies the user's own YouTube playlists into Arnav playlists using the official Data API with a
@@ -68,33 +72,73 @@ class YouTubeImporter(
         var tracksTotal = 0
         var skipped = 0
         selected.forEachIndexed { index, pl ->
-            val ids = ArrayList<String>()
-            var page: String? = null
-            var pages = 0
-            do {
-                val r = api.playlistItems(pl.id, page, token)
-                usage.youtubeCall(YouTubeCosts.PLAYLIST_ITEMS, false)
-                r.items.mapNotNullTo(ids) { it.contentDetails.videoId }
-                onProgress(ImportProgress(pl.title, index, selected.size, ids.size, pl.itemCount.coerceAtLeast(ids.size)))
-                page = r.nextPageToken
-            } while (page != null && ++pages < MAX_PAGES && ids.size < MAX_TRACKS)
-            val wanted = ids.distinct().take(MAX_TRACKS)
-            val tracks = ArrayList<Track>(wanted.size)
-            wanted.chunked(50).forEach { chunk ->
-                val r = api.videos(chunk, token)
-                usage.youtubeCall(YouTubeCosts.VIDEOS_LIST, false)
-                val byId = r.items.filter { it.status.embeddable && it.snippet.liveBroadcastContent != "live" }.associateBy { it.id }
-                chunk.forEach { id -> byId[id]?.let { tracks += it.toTrack() } ?: skipped++ }
-            }
+            val read = readTracks(token, pl, index, selected.size, onProgress)
             library.importPlaylist(
                 remoteId = pl.id,
                 name = pl.title,
                 description = "Imported from YouTube",
-                tracks = tracks,
+                tracks = read.tracks,
             )
-            tracksTotal += tracks.size
+            tracksTotal += read.tracks.size
+            skipped += read.skipped
         }
         return ImportSummary(selected.size, tracksTotal, skipped)
+    }
+
+    /**
+     * Re-reads playlists imported earlier (by their YouTube ids) and replaces each Arnav copy's songs
+     * with the current YouTube contents. Local names and descriptions are kept. A playlist that no
+     * longer exists on YouTube, or comes back with no playable videos, is left untouched.
+     * Costs about 1 unit per 50 songs; no searches.
+     */
+    suspend fun refresh(token: String, remoteIds: Collection<String>? = null, onProgress: (ImportProgress) -> Unit = {}): RefreshSummary {
+        val targets = library.importedYouTubePlaylists().filter { p ->
+            val ref = p.remoteRef
+            ref != null && (remoteIds == null || ref in remoteIds)
+        }
+        var refreshed = 0
+        var tracksTotal = 0
+        var skipped = 0
+        var missing = 0
+        targets.forEachIndexed { index, p ->
+            val remoteId = p.remoteRef ?: return@forEachIndexed
+            val read = try {
+                readTracks(token, RemotePlaylist(remoteId, p.name, 0, null), index, targets.size, onProgress)
+            } catch (e: MusicError.Http) {
+                if (e.code == 404 || e.code == 403) { missing++; return@forEachIndexed } else throw e
+            }
+            if (read.tracks.isEmpty()) { missing++; return@forEachIndexed }
+            library.importPlaylist(remoteId = remoteId, name = p.name, description = p.description, tracks = read.tracks)
+            refreshed++
+            tracksTotal += read.tracks.size
+            skipped += read.skipped
+        }
+        return RefreshSummary(refreshed, tracksTotal, skipped, missing)
+    }
+
+    private class ReadResult(val tracks: List<Track>, val skipped: Int)
+
+    private suspend fun readTracks(token: String, pl: RemotePlaylist, index: Int, count: Int, onProgress: (ImportProgress) -> Unit): ReadResult {
+        var skipped = 0
+        val ids = ArrayList<String>()
+        var page: String? = null
+        var pages = 0
+        do {
+            val r = api.playlistItems(pl.id, page, token)
+            usage.youtubeCall(YouTubeCosts.PLAYLIST_ITEMS, false)
+            r.items.mapNotNullTo(ids) { it.contentDetails.videoId }
+            onProgress(ImportProgress(pl.title, index, count, ids.size, pl.itemCount.coerceAtLeast(ids.size)))
+            page = r.nextPageToken
+        } while (page != null && ++pages < MAX_PAGES && ids.size < MAX_TRACKS)
+        val wanted = ids.distinct().take(MAX_TRACKS)
+        val tracks = ArrayList<Track>(wanted.size)
+        wanted.chunked(50).forEach { chunk ->
+            val r = api.videos(chunk, token)
+            usage.youtubeCall(YouTubeCosts.VIDEOS_LIST, false)
+            val byId = r.items.filter { it.status.embeddable && it.snippet.liveBroadcastContent != "live" }.associateBy { it.id }
+            chunk.forEach { id -> byId[id]?.let { tracks += it.toTrack() } ?: skipped++ }
+        }
+        return ReadResult(tracks, skipped)
     }
 
     private companion object {

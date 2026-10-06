@@ -3,6 +3,7 @@ package com.arnav.music.ui.components
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -44,6 +45,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -60,6 +65,7 @@ import com.arnav.music.ui.theme.ArnavTheme
 import com.arnav.music.ui.theme.Radius
 import com.arnav.music.ui.theme.Size
 import com.arnav.music.ui.theme.Space
+import androidx.compose.ui.util.lerp
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -139,17 +145,58 @@ fun HeartButton(liked: Boolean, onToggle: () -> Unit, modifier: Modifier = Modif
                 }
             }
         }
-        AnimatedContent(liked, transitionSpec = { (scaleIn(motion.expressive(), 0.6f) + fadeIn(motion.fast())) togetherWith (scaleOut(motion.fast(), 0.8f) + fadeOut(motion.fast())) }, label = "heart") { isLiked ->
-            Icon(
-                if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder, null,
-                tint = if (isLiked) accent else tint,
-                modifier = Modifier.size(size).graphicsLayer { scaleX = pop.value; scaleY = pop.value },
-            )
+        // Morph: the outline warms to the accent while the fill grows out from the heart's centre.
+        val fill by animateFloatAsState(
+            if (liked) 1f else 0f,
+            if (motion.reduced) snap() else spring(dampingRatio = 0.55f, stiffness = 420f),
+            label = "heartFill",
+        )
+        Box(Modifier.size(size).graphicsLayer { scaleX = pop.value; scaleY = pop.value }, contentAlignment = Alignment.Center) {
+            Icon(Icons.Rounded.FavoriteBorder, null, tint = lerp(tint, accent, fill.coerceIn(0f, 1f)), modifier = Modifier.size(size))
+            if (fill > 0.01f) {
+                Icon(
+                    Icons.Rounded.Favorite, null, tint = accent,
+                    modifier = Modifier.size(size).graphicsLayer {
+                        val f = fill.coerceIn(0f, 1.15f)
+                        scaleX = f; scaleY = f
+                        alpha = fill.coerceIn(0f, 1f)
+                    },
+                )
+            }
         }
     }
 }
 
-/** Play/pause that morphs (rotate + crossfade) rather than swapping abruptly. */
+/**
+ * Play ⇄ pause as one shape: the triangle's two halves slide and square off into the two bars
+ * (and back), so the control never swaps icons abruptly.
+ */
+@Composable
+fun PlayPauseGlyph(morph: Float, color: Color, modifier: Modifier = Modifier) {
+    val path = remember { Path() }
+    Canvas(modifier) {
+        val t = morph.coerceIn(0f, 1f)
+        val w = size.width
+        val h = size.height
+        fun quad(play: FloatArray, pause: FloatArray) {
+            path.reset()
+            for (i in 0 until 4) {
+                val x = lerp(play[i * 2], pause[i * 2], t) * w
+                val y = lerp(play[i * 2 + 1], pause[i * 2 + 1], t) * h
+                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            path.close()
+            drawPath(path, color)
+            // A hairline stroke with round joins softens the corners like the rounded icon set.
+            drawPath(path, color, style = Stroke(width = w * 0.06f, join = StrokeJoin.Round))
+        }
+        // Play: triangle (0.28,0.16)-(0.84,0.5)-(0.28,0.84) split at x = 0.56. Pause: two bars.
+        quad(floatArrayOf(0.28f, 0.16f, 0.56f, 0.33f, 0.56f, 0.67f, 0.28f, 0.84f), floatArrayOf(0.22f, 0.18f, 0.42f, 0.18f, 0.42f, 0.82f, 0.22f, 0.82f))
+        quad(floatArrayOf(0.56f, 0.33f, 0.84f, 0.5f, 0.84f, 0.5f, 0.56f, 0.67f), floatArrayOf(0.58f, 0.18f, 0.78f, 0.18f, 0.78f, 0.82f, 0.58f, 0.82f))
+    }
+}
+
+/** Play/pause button whose glyph morphs between the two states. */
 @Composable
 fun PlayPauseButton(
     playing: Boolean,
@@ -179,11 +226,12 @@ fun PlayPauseButton(
                 modifier = Modifier.size(size - 6.dp).graphicsLayer { alpha = ring }, color = content.copy(alpha = 0.35f), strokeWidth = 2.dp,
             )
         }
-        AnimatedContent(playing, transitionSpec = {
-            (fadeIn(motion.fast()) + scaleIn(motion.expressive(), 0.7f)) togetherWith (fadeOut(motion.fast()) + scaleOut(motion.fast(), 0.7f))
-        }, label = "pp") { p ->
-            Icon(if (p) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, null, tint = content, modifier = Modifier.size(size * 0.46f))
-        }
+        val morph by animateFloatAsState(
+            if (playing) 1f else 0f,
+            if (motion.reduced) snap() else spring(dampingRatio = 0.72f, stiffness = 650f),
+            label = "pp",
+        )
+        PlayPauseGlyph(morph, content, Modifier.size(size * 0.46f))
     }
 }
 

@@ -1,5 +1,6 @@
 package com.arnav.music.ui.components
 
+import com.arnav.music.ui.sharedArt
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
@@ -62,11 +63,11 @@ fun TrackCard(track: Track, onClick: () -> Unit, modifier: Modifier = Modifier, 
 }
 
 @Composable
-fun MixCard(title: String, subtitle: String, artwork: List<String>, seed: String, onClick: () -> Unit, modifier: Modifier = Modifier, width: Dp = Size.artworkL) {
+fun MixCard(title: String, subtitle: String, artwork: List<String>, seed: String, onClick: () -> Unit, modifier: Modifier = Modifier, width: Dp = Size.artworkL, sharedKey: String? = null) {
     val interaction = rememberInteraction()
     Column(modifier.width(width).pressScale(interaction, 0.96f).combinedClickable(interaction, indication = null, onClick = onClick)) {
         Box {
-            Mosaic(artwork, seed, Modifier.size(width))
+            Mosaic(artwork, seed, Modifier.sharedArt(sharedKey).size(width))
             Box(Modifier.matchParentSize().clip(RoundedCornerShape(Radius.artwork)).padding(Space.m), contentAlignment = Alignment.BottomStart) {
                 Text(title, style = ArnavTheme.type.title, color = Color.White, maxLines = 2,
                     modifier = Modifier.clip(RoundedCornerShape(Radius.xs)))

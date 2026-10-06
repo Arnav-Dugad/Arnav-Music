@@ -17,6 +17,7 @@ import com.arnav.music.domain.model.TrackId
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -161,6 +162,53 @@ class LibraryRepository(
         sync.requestSync()
         return id
     }
+
+    /** On-device songs right now; queries MediaStore once when nothing is observing [localTracks] yet. */
+    suspend fun localTracksSnapshot(): List<Track> =
+        localTracks.value.ifEmpty { runCatching { local.tracks().first() }.getOrDefault(emptyList()) }
+
+    /**
+     * Creates an Arnav playlist from a Spotify/CSV import. Each track is stored at its position in the
+     * source file, so songs matched later can be slotted into their original place.
+     */
+    suspend fun createImportedPlaylist(name: String, description: String, placed: List<Pair<Int, Track>>): String {
+        val id = "arn_" + UUID.randomUUID().toString().replace("-", "").take(16)
+        val now = clock.now()
+        val unique = placed.distinctBy { it.second.id }.sortedBy { it.first }
+        db.playlists().upsert(
+            PlaylistEntity(id, name.trim().take(100).ifBlank { "Imported playlist" }, description.take(500), PlaylistKind.ARNAV.name, unique.firstOrNull()?.second?.artworkUrl, false, now, now),
+        )
+        if (unique.isNotEmpty()) {
+            remember(unique.map { it.second })
+            db.playlists().insertTracks(unique.map { (pos, t) -> PlaylistTrackEntity(id, t.id.value, pos, now) })
+        }
+        sync.requestSync()
+        return id
+    }
+
+    /**
+     * Adds a song matched after import at its source [position]. Returns false when the playlist is
+     * gone (deleted) or already holds that song.
+     */
+    suspend fun insertImportedTrack(playlistId: String, track: Track, position: Int): Boolean {
+        val p = db.playlists().get(playlistId) ?: return false
+        if (p.deleted) return false
+        remember(listOf(track))
+        val now = clock.now()
+        val inserted = db.playlists().addTrack(PlaylistTrackEntity(playlistId, track.id.value, position, now)) != -1L
+        if (inserted) {
+            db.playlists().upsert(p.copy(updatedAt = now, dirty = true, artworkUrl = p.artworkUrl ?: track.artworkUrl))
+            sync.requestSync()
+        }
+        return inserted
+    }
+
+    /** True while the playlist exists and hasn't been deleted. */
+    suspend fun playlistExists(playlistId: String): Boolean = db.playlists().get(playlistId)?.let { !it.deleted } ?: false
+
+    /** Playlists copied from the user's YouTube account (see [importPlaylist]) that are still in the library. */
+    suspend fun importedYouTubePlaylists(): List<PlaylistEntity> =
+        db.playlists().all().filter { !it.deleted && it.remoteRef != null && it.id.startsWith("ytimp_") }
 
     fun playlist(id: String): Flow<PlaylistEntity?> = db.playlists().observeOne(id)
     fun playlistTracks(id: String): Flow<List<Track>> = db.playlists().tracks(id).map { l -> l.map { it.toDomain() } }

@@ -10,13 +10,18 @@ import com.arnav.music.domain.intelligence.RecapPeriod
 import com.arnav.music.domain.intelligence.TasteDna
 import com.arnav.music.domain.intelligence.TimeMachineInsight
 import com.arnav.music.domain.intelligence.InsightsEngine
+import com.arnav.music.domain.intelligence.Milestone
+import com.arnav.music.domain.intelligence.Milestones
+import com.arnav.music.domain.intelligence.StreakInfo
 import com.arnav.music.domain.model.PlayEvent
 import com.arnav.music.domain.model.Track
 import com.arnav.music.domain.model.TrackId
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -44,6 +49,21 @@ class InsightsViewModel(private val intelligence: IntelligenceRepository, privat
     val buckets: StateFlow<List<TimelineBucket>> = _buckets.asStateFlow()
     private val _selected = MutableStateFlow<Pair<TimelineBucket, List<Track>>?>(null)
     val selected: StateFlow<Pair<TimelineBucket, List<Track>>?> = _selected.asStateFlow()
+
+    private val _streak = MutableStateFlow<StreakInfo?>(null)
+    val streak: StateFlow<StreakInfo?> = _streak.asStateFlow()
+    private val _milestones = MutableStateFlow<List<Milestone>>(emptyList())
+    /** Every milestone in a fixed order; achieved ones carry the time they were reached. */
+    val milestones: StateFlow<List<Milestone>> = _milestones.asStateFlow()
+
+    fun loadMilestones() = viewModelScope.launch {
+        val events = library.events(0L)
+        val zone = ZoneId.systemDefault()
+        val now = System.currentTimeMillis()
+        val (s, m) = withContext(Dispatchers.Default) { Milestones.streak(events, now, zone) to Milestones.compute(events, zone) }
+        _streak.value = s
+        _milestones.value = m
+    }
 
     fun loadDna() = viewModelScope.launch {
         val dna = intelligence.tasteDna()

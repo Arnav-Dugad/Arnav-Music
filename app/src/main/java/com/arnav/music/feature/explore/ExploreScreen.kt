@@ -1,5 +1,7 @@
 package com.arnav.music.feature.explore
 
+import com.arnav.music.ui.OnTabReselect
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -83,9 +85,12 @@ fun ExploreScreen(vm: ExploreViewModel = koinViewModel()) {
     val chrome = LocalChromePadding.current
     LaunchedEffect(online) { if (online) vm.loadTrending() }
 
+    val grid = rememberLazyGridState()
+    OnTabReselect(Routes.EXPLORE) { grid.animateScrollToItem(0) }
     LazyVerticalGrid(
         columns = GridCells.Adaptive(160.dp),
         modifier = Modifier.fillMaxSize(),
+        state = grid,
         contentPadding = PaddingValues(start = Space.gutter, end = Space.gutter, bottom = chrome.calculateBottomPadding() + Space.xl),
         horizontalArrangement = Arrangement.spacedBy(Space.m),
         verticalArrangement = Arrangement.spacedBy(Space.m),

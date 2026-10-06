@@ -8,6 +8,12 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
+import androidx.navigation.NamedNavArgument
+import androidx.navigation.NavBackStackEntry
+import androidx.navigation.NavGraphBuilder
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -29,10 +35,22 @@ import com.arnav.music.feature.settings.SettingsScreen
 import com.arnav.music.ui.theme.ArnavTheme
 import com.arnav.music.ui.theme.Easing
 
+/** A destination whose content can take part in shared-element artwork transitions. */
+private fun NavGraphBuilder.screen(
+    route: String,
+    arguments: List<NamedNavArgument> = emptyList(),
+    content: @Composable (NavBackStackEntry) -> Unit,
+) = composable(route, arguments) { entry ->
+    CompositionLocalProvider(LocalNavAnimatedScope provides this) { content(entry) }
+}
+
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun AppNavHost(nav: NavHostController) {
     val motion = ArnavTheme.motion
     val travel = motion.travel
+    SharedTransitionLayout {
+    CompositionLocalProvider(LocalSharedScope provides this) {
     NavHost(
         navController = nav,
         startDestination = Routes.HOME,
@@ -50,33 +68,35 @@ fun AppNavHost(nav: NavHostController) {
         popEnterTransition = { fadeIn(motion.fast()) + scaleIn(motion.fast(), 0.97f) },
         popExitTransition = { slideOutHorizontally(motion.offsetSpring()) { (it * 0.18f * travel).toInt() } + fadeOut(motion.fast()) },
     ) {
-        composable(Routes.HOME) { HomeScreen() }
-        composable(Routes.EXPLORE) { ExploreScreen() }
-        composable(Routes.LIBRARY) { LibraryScreen() }
-        composable(Routes.AI, arguments = listOf(navArgument("q") { type = NavType.StringType; defaultValue = "" })) {
+        screen(Routes.HOME) { HomeScreen() }
+        screen(Routes.EXPLORE) { ExploreScreen() }
+        screen(Routes.LIBRARY) { LibraryScreen() }
+        screen(Routes.AI, arguments = listOf(navArgument("q") { type = NavType.StringType; defaultValue = "" })) {
             ArnavAiScreen(initialQuery = it.arguments?.getString("q").orEmpty())
         }
-        composable(Routes.SEARCH, arguments = listOf(navArgument("q") { type = NavType.StringType; defaultValue = "" })) {
+        screen(Routes.SEARCH, arguments = listOf(navArgument("q") { type = NavType.StringType; defaultValue = "" })) {
             SearchScreen(initialQuery = it.arguments?.getString("q").orEmpty())
         }
-        composable(Routes.COLLECTION, arguments = listOf(navArgument("kind") { type = NavType.StringType }, navArgument("id") { type = NavType.StringType })) {
+        screen(Routes.COLLECTION, arguments = listOf(navArgument("kind") { type = NavType.StringType }, navArgument("id") { type = NavType.StringType })) {
             val kind = runCatching { CollectionKind.valueOf(it.arguments?.getString("kind").orEmpty()) }.getOrDefault(CollectionKind.LIKED)
             CollectionScreen(kind, it.arguments?.getString("id").orEmpty())
         }
-        composable(Routes.ARTIST, arguments = listOf(navArgument("name") { type = NavType.StringType })) {
+        screen(Routes.ARTIST, arguments = listOf(navArgument("name") { type = NavType.StringType })) {
             ArtistScreen(it.arguments?.getString("name").orEmpty())
         }
-        composable(Routes.MOMENT, arguments = listOf(navArgument("id") { type = NavType.StringType })) {
+        screen(Routes.MOMENT, arguments = listOf(navArgument("id") { type = NavType.StringType })) {
             MomentScreen(it.arguments?.getString("id").orEmpty())
         }
-        composable(Routes.INSIGHTS) { InsightsScreen() }
-        composable(Routes.CONSTELLATION) { ConstellationScreen() }
-        composable(Routes.TIMELINE) { TimelineScreen() }
-        composable(Routes.PROFILE) { ProfileScreen() }
-        composable(Routes.AUTH) { AuthScreen() }
-        composable(Routes.SETTINGS) { SettingsScreen(page = "") }
-        composable(Routes.SETTINGS_PAGE, arguments = listOf(navArgument("page") { type = NavType.StringType })) {
+        screen(Routes.INSIGHTS) { InsightsScreen() }
+        screen(Routes.CONSTELLATION) { ConstellationScreen() }
+        screen(Routes.TIMELINE) { TimelineScreen() }
+        screen(Routes.PROFILE) { ProfileScreen() }
+        screen(Routes.AUTH) { AuthScreen() }
+        screen(Routes.SETTINGS) { SettingsScreen(page = "") }
+        screen(Routes.SETTINGS_PAGE, arguments = listOf(navArgument("page") { type = NavType.StringType })) {
             SettingsScreen(page = it.arguments?.getString("page").orEmpty())
         }
+    }
+    }
     }
 }

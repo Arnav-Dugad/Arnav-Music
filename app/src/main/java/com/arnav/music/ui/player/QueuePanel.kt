@@ -60,6 +60,7 @@ import com.arnav.music.ui.components.ArnavIconButton
 import com.arnav.music.ui.components.Artwork
 import com.arnav.music.ui.components.Pill
 import com.arnav.music.ui.components.TrackRow
+import com.arnav.music.ui.components.bounce
 import com.arnav.music.ui.theme.ArnavTheme
 import com.arnav.music.ui.theme.Radius
 import com.arnav.music.ui.theme.Space
@@ -110,7 +111,8 @@ fun QueuePanel(
             Text("Nothing queued. Swipe right on any song to add it here.", style = ArnavTheme.type.bodySmall, color = c.contentMuted, modifier = Modifier.padding(Space.gutter))
             return@Column
         }
-        LazyColumn(state = listState, contentPadding = PaddingValues(bottom = Space.xxxl), modifier = Modifier.weight(1f)) {
+        val bounce = com.arnav.music.ui.components.rememberBounce()
+        LazyColumn(state = listState, contentPadding = PaddingValues(bottom = Space.xxxl), modifier = Modifier.weight(1f).bounce(bounce)) {
             if (journey) {
                 val start = System.currentTimeMillis() + ((q.current?.track?.durationMs ?: 0L) / 2)
                 val etas = q.upNext.runningFold(start) { acc, it -> acc + (it.track.durationMs ?: 210_000L) }
