@@ -11,16 +11,18 @@ import com.arnav.music.ui.AppViewModel
 import com.arnav.music.ui.ArnavAppRoot
 import com.arnav.music.ui.DeepLink
 import org.koin.compose.viewmodel.koinViewModel
+import org.koin.android.ext.android.inject
+import com.arnav.music.core.settings.SettingsRepository
 
 class MainActivity : ComponentActivity() {
+    private val settingsRepo: SettingsRepository by inject()
     private val deepLink = mutableStateOf<DeepLink?>(null)
     private val openPlayer = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
         // Hold the system splash until settings are read, so returning users never see onboarding flash.
-        val settings: com.arnav.music.core.settings.SettingsRepository = org.koin.android.ext.android.getKoin().get()
-        splash.setKeepOnScreenCondition { !settings.loaded.value }
+        splash.setKeepOnScreenCondition { !settingsRepo.loaded.value }
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) handle(intent)
