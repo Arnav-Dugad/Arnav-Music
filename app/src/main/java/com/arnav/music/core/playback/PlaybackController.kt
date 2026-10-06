@@ -124,6 +124,7 @@ class PlaybackController(
     private var progressJob: Job? = null
     private var sleepJob: Job? = null
     private var persistJob: Job? = null
+    private var fadeJob: Job? = null
     private val prefs = context.getSharedPreferences("playback_state", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -405,9 +406,13 @@ class PlaybackController(
     private fun fadeTo(c: MediaController, play: Boolean) {
         // A user play/pause wins over a smart outro fade; the ramp below starts from the current volume.
         cancelSmartFade(restoreVolume = false)
+        // A newer play/pause cancels an unfinished ramp: otherwise a quick pause → play would be
+        // undone when the old fade-out ends with pause().
+        fadeJob?.cancel()
+        fadeJob = null
         val fade = settings.settings.value.fadeMs.toLong()
         if (fade <= 0) { c.volume = 1f; if (play) c.play() else c.pause(); return }
-        scope.launch {
+        fadeJob = scope.launch {
             val steps = 12
             if (play) {
                 c.volume = 0f; c.play()
