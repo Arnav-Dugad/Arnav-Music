@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">Arnav Music</string>
     <string name="tagline">Music, alive.</string>
+    <string name="widget_description">Now playing, Arnav AI and Moments at a glance</string>
 </resources>

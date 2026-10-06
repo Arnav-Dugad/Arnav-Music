@@ -19,6 +19,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -38,13 +42,19 @@ import com.arnav.music.ui.theme.Space
 fun TrackCard(track: Track, onClick: () -> Unit, modifier: Modifier = Modifier, caption: String? = null, onLongClick: (() -> Unit)? = null, width: Dp = Size.artworkL) {
     val interaction = rememberInteraction()
     val haptics = ArnavTheme.haptics
+    val nav = com.arnav.music.ui.LocalNavigator.current
+    var bounds by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     Column(
         modifier.width(width)
             .pressScale(interaction, 0.96f)
-            .combinedClickable(interaction, indication = null, role = Role.Button, onClick = onClick, onLongClick = onLongClick?.let { { haptics.longPress(); it() } })
+            .combinedClickable(interaction, indication = null, role = Role.Button, onClick = {
+                onClick()
+                // The cover flies from this card into Now Playing.
+                bounds?.let(nav.flyFrom)
+            }, onLongClick = onLongClick?.let { { haptics.longPress(); it() } })
             .semantics(mergeDescendants = true) { contentDescription = "${track.title} by ${track.artist}" },
     ) {
-        Artwork(track.artworkUrl, track.id.value, Modifier.size(width), decodeSize = 360)
+        Artwork(track.artworkUrl, track.id.value, Modifier.size(width).onGloballyPositioned { bounds = it.boundsInRoot() }, decodeSize = 360)
         Spacer(Modifier.height(10.dp))
         Text(track.title, style = ArnavTheme.type.titleSmall, color = ArnavTheme.colors.content, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(caption ?: track.artist, style = ArnavTheme.type.caption, color = ArnavTheme.colors.contentMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)

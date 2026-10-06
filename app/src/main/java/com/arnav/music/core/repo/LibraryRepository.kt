@@ -139,6 +139,29 @@ class LibraryRepository(
         db.playlists().upsert(PlaylistEntity(playlist.id, playlist.name, playlist.description, PlaylistKind.YOUTUBE.name, playlist.artworkUrl, false, now, now, dirty = false, remoteRef = playlist.id.removePrefix("ytpl:")))
     }
 
+    /**
+     * Creates or refreshes an Arnav playlist copied from the user's YouTube account. The id is stable
+     * per source playlist, so importing again updates it instead of duplicating it. Synced like any
+     * Arnav playlist (capped at 500 tracks, the sync schema limit).
+     */
+    suspend fun importPlaylist(remoteId: String, name: String, description: String, tracks: List<Track>): String {
+        val id = "ytimp_" + remoteId.filter { it.isLetterOrDigit() || it == '_' || it == '-' }.take(56)
+        val now = clock.now()
+        val existing = db.playlists().get(id)
+        val capped = tracks.distinctBy { it.id }.take(500)
+        remember(capped)
+        db.playlists().upsert(
+            PlaylistEntity(
+                id, name.trim().take(100).ifBlank { "YouTube playlist" }, description.take(500), PlaylistKind.ARNAV.name,
+                capped.firstOrNull()?.artworkUrl ?: existing?.artworkUrl, existing?.pinned ?: false,
+                existing?.createdAt ?: now, now, deleted = false, dirty = true, remoteRef = remoteId,
+            ),
+        )
+        db.playlists().replaceTracks(id, capped.map { it.id.value }, now)
+        sync.requestSync()
+        return id
+    }
+
     fun playlist(id: String): Flow<PlaylistEntity?> = db.playlists().observeOne(id)
     fun playlistTracks(id: String): Flow<List<Track>> = db.playlists().tracks(id).map { l -> l.map { it.toDomain() } }
 

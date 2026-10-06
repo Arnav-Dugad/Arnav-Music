@@ -101,6 +101,7 @@ val appModule = module {
     single { YouTubeEngine() }
     single { com.arnav.music.core.update.UpdateManager(androidContext(), get(), get()) }
     single { com.arnav.music.core.youtube.UploadResolver(get()) }
+    single { com.arnav.music.core.youtube.YouTubeImporter(get(), get(), get()) }
     single { PlaybackController(androidContext(), get(), get(), get(), get(), get(), get()) }
 
     viewModel { AppViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
@@ -108,6 +109,7 @@ val appModule = module {
     viewModel { HomeViewModel(get(), get(), get(), get()) }
     viewModel { ExploreViewModel(get(), get(), get(), get()) }
     viewModel { LibraryViewModel(get(), get(), get()) }
+    viewModel { com.arnav.music.feature.library.YouTubeImportViewModel(get()) }
     viewModel { ArnavAiViewModel(get(), get(), get(), get()) }
     viewModel { InsightsViewModel(get(), get()) }
     viewModel { SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }

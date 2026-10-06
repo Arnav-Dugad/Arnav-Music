@@ -175,11 +175,13 @@ private fun RootPage() {
 @Composable
 private fun AppearancePage(vm: SettingsViewModel) {
     val s by vm.settings.collectAsStateWithLifecycle()
+    val reveal = com.arnav.music.ui.LocalThemeReveal.current
+    fun animated(change: () -> Unit) { reveal?.run(change) ?: change() }
     val budget by vm.budget.collectAsStateWithLifecycle()
     Column {
         GlassPreview(s.glass)
         SettingsGroup("Theme") {
-            ChoiceRow("Theme", ThemeMode.entries, s.themeMode, { when (it) { ThemeMode.SYSTEM -> "System"; ThemeMode.LIGHT -> "Light"; ThemeMode.DARK -> "Dark"; ThemeMode.OLED -> "OLED black" } }, { m -> vm.update { it.copy(themeMode = m) } })
+            ChoiceRow("Theme", ThemeMode.entries, s.themeMode, { when (it) { ThemeMode.SYSTEM -> "System"; ThemeMode.LIGHT -> "Light"; ThemeMode.DARK -> "Dark"; ThemeMode.OLED -> "OLED black" } }, { m -> animated { vm.update { it.copy(themeMode = m) } } })
             Divider()
             ChoiceRow("Accent", AccentMode.entries, s.accentMode, { when (it) { AccentMode.ARTWORK -> "From artwork"; AccentMode.MATERIAL_YOU -> "Material You"; AccentMode.PRESET -> "Preset" } }, { m -> vm.update { it.copy(accentMode = m) } })
             if (s.accentMode == AccentMode.PRESET) {
@@ -192,7 +194,7 @@ private fun AppearancePage(vm: SettingsViewModel) {
             }
         }
         SettingsGroup("Glass UI", footer = if (budget.glass != s.glass) "Currently reduced: ${budget.reason}." else "Glass is a material with four optical layers. Pure mode stays fully opaque and just as premium.") {
-            ChoiceRow("Glass", GlassLevel.entries, s.glass, { when (it) { GlassLevel.OFF -> "Pure"; GlassLevel.SUBTLE -> "Subtle"; GlassLevel.FULL -> "Full" } }, { g -> vm.update { it.copy(glass = g) } })
+            ChoiceRow("Glass", GlassLevel.entries, s.glass, { when (it) { GlassLevel.OFF -> "Pure"; GlassLevel.SUBTLE -> "Subtle"; GlassLevel.FULL -> "Full" } }, { g -> animated { vm.update { it.copy(glass = g) } } })
         }
         SettingsGroup("Motion") {
             ChoiceRow("Motion", MotionLevel.entries, s.motion, { it.name.lowercase().replaceFirstChar(Char::uppercase) }, { m -> vm.update { it.copy(motion = m) } })
@@ -215,6 +217,7 @@ private fun GlassPreview(level: GlassLevel) {
         Row(Modifier.fillMaxSize().padding(Space.l), horizontalArrangement = Arrangement.spacedBy(Space.s), verticalAlignment = Alignment.CenterVertically) {
             GlassMaterial.entries.forEach { m ->
                 Box(Modifier.weight(1f).height(110.dp).glass(m, RoundedCornerShape(Radius.m), level = level), contentAlignment = Alignment.BottomStart) {
+                    if (m == GlassMaterial.Elevated) com.arnav.music.ui.theme.LiquidGlassBackdrop(null, "glass-preview", Radius.m, alpha = 0.35f)
                     Text(m.name, style = ArnavTheme.type.caption, color = ArnavTheme.colors.content, modifier = Modifier.padding(Space.s))
                 }
             }

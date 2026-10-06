@@ -16,6 +16,8 @@ work = "2.10.2"
 splashscreen = "1.0.1"
 palette = "1.0.0"
 profileinstaller = "1.4.1"
+glance = "1.1.1"
+playServicesAuth = "21.3.0"
 credentials = "1.5.0"
 googleid = "1.1.1"
 firebaseBom = "34.0.0"
@@ -52,6 +54,8 @@ androidx-profileinstaller = { module = "androidx.profileinstaller:profileinstall
 androidx-credentials = { module = "androidx.credentials:credentials", version.ref = "credentials" }
 androidx-credentials-play = { module = "androidx.credentials:credentials-play-services-auth", version.ref = "credentials" }
 googleid = { module = "com.google.android.libraries.identity.googleid:googleid", version.ref = "googleid" }
+glance-appwidget = { module = "androidx.glance:glance-appwidget", version.ref = "glance" }
+play-services-auth = { module = "com.google.android.gms:play-services-auth", version.ref = "playServicesAuth" }
 
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
 compose-ui = { module = "androidx.compose.ui:ui" }

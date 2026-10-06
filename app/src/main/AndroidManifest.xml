@@ -75,6 +75,16 @@
             android:name=".core.update.InstallResultReceiver"
             android:exported="false" />
 
+        <receiver
+            android:name=".widget.ArnavWidgetReceiver"
+            android:exported="true"
+            android:label="Arnav Music">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/arnav_widget_info" />
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.shares"

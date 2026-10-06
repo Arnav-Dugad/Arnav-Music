@@ -15,6 +15,8 @@ class Navigator(
     val openPlayer: () -> Unit,
     val openPalette: () -> Unit,
     val share: (Track) -> Unit,
+    /** Opens Now Playing with the artwork flying from [bounds] (root coordinates, px). */
+    val flyFrom: (androidx.compose.ui.geometry.Rect) -> Unit = {},
 ) {
     private var lastRoute: String? = null
     private var lastAt = 0L

@@ -131,6 +131,7 @@ fun ArnavAppRoot(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled: () ->
     val palette = rememberArtworkPalette(track?.artworkUrl, mode)
 
     val loaded by vm.settingsLoaded.collectAsStateWithLifecycle()
+    ThemeRevealHost(reduceMotion = budget.reducedMotion) {
     ArnavMusicTheme(settings, budget, palette) {
         if (!loaded) {
             Box(Modifier.fillMaxSize().background(ArnavTheme.colors.background))
@@ -141,6 +142,7 @@ fun ArnavAppRoot(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled: () ->
             return@ArnavMusicTheme
         }
         AppScaffold(vm, deepLink, onDeepLinkHandled, openPlayer, onOpenPlayerHandled)
+    }
     }
 }
 
@@ -160,6 +162,7 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
     val switching by vm.player.switchingVariant.collectAsStateWithLifecycle()
     val expand = remember { Animatable(0f) }
     var sheet by remember { mutableStateOf<SheetRequest?>(null) }
+    var launchOrigin by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     var paletteOpen by rememberSaveable { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val palette = com.arnav.music.ui.theme.LocalArtworkPalette.current ?: com.arnav.music.domain.color.ArtworkPalette.neutral(surfaceMode(settings))
@@ -171,6 +174,12 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
             openPlayer = { scope.launch { expand.animateTo(1f, motion.cinematic()) } },
             openPalette = { paletteOpen = true },
             share = { t -> scope.launch { runCatching { ShareCards.share(context, t) } } },
+            flyFrom = { bounds ->
+                if (!motion.reduced) {
+                    launchOrigin = bounds
+                    scope.launch { expand.snapTo(0f); expand.animateTo(1f, motion.cinematic()) }
+                }
+            },
         )
     }
 
@@ -260,8 +269,11 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
                         onShare = navigator.share,
                         switchVariant = vm.player::switchVariant,
                         findAnotherUpload = vm.player::findAnotherUpload,
+                        skipTo = { vm.player.skipTo(it) },
                     ),
                     switchingVariant = switching,
+                    launchOrigin = launchOrigin,
+                    onLaunchConsumed = { launchOrigin = null },
                     queueContent = { close ->
                         QueuePanel(state, vm.player::move, vm.player::removeAt, { vm.player.skipTo(it) }, { vm.saveQueueAsPlaylist() }, close)
                     },

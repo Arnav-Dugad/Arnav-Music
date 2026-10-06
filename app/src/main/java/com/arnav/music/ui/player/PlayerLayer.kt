@@ -134,6 +134,7 @@ class PlayerActions(
     val onShare: (Track) -> Unit,
     val switchVariant: (com.arnav.music.domain.model.MediaVariant) -> Unit = {},
     val findAnotherUpload: () -> Unit = {},
+    val skipTo: (Int) -> Unit = {},
 )
 
 /**
@@ -155,6 +156,9 @@ fun PlayerLayer(
     wide: Boolean,
     actions: PlayerActions,
     switchingVariant: Boolean = false,
+    /** Bounds (root px) of a tapped card: the artwork flies from there into Now Playing. */
+    launchOrigin: androidx.compose.ui.geometry.Rect? = null,
+    onLaunchConsumed: () -> Unit = {},
     queueContent: @Composable (onClose: () -> Unit) -> Unit,
 ) {
     val track = state.current ?: return
@@ -270,9 +274,17 @@ fun PlayerLayer(
         }
 
         // ---- The travelling surface: artwork (local) or the visible YouTube player ----
-        val left = lerp(miniLeft, fullLeft, e)
-        val top = lerp(miniTop, fullTop, e)
-        val scale = lerp(miniArtW / fullW, 1f, e)
+        // When opened from a card, it starts at that card's artwork instead of the MorphBar.
+        val origin = launchOrigin
+        LaunchedEffect(origin, expand.isRunning, e) { if (origin != null && !expand.isRunning && (e >= 0.999f || e <= 0.001f)) onLaunchConsumed() }
+        val startLeft = origin?.left ?: miniLeft
+        val startTop = origin?.top ?: miniTop
+        val startW = origin?.width?.takeIf { it > 1f } ?: miniArtW
+        val left = lerp(startLeft, fullLeft, e)
+        val top = lerp(startTop, fullTop, e)
+        val scale = lerp(startW / fullW, 1f, e)
+        // Swipeable cover carousel once Now Playing has settled (on-device covers only).
+        val carousel = !isYouTube && !wide && !immersive && e >= 0.999f && !expand.isRunning && state.queue.items.size > 1
         val cornerFull = 22.dp
         val cornerMini = with(density) { (px(10f) / scale).toDp() }
         val corner = androidx.compose.ui.unit.lerp(cornerMini, cornerFull, e)
@@ -283,6 +295,7 @@ fun PlayerLayer(
                 .graphicsLayer {
                     transformOrigin = TransformOrigin(0f, 0f)
                     scaleX = scale; scaleY = scale
+                    alpha = if (carousel) 0f else 1f
                     shadowElevation = e * 24.dp.toPx()
                     shape = RoundedCornerShape(corner)
                     clip = true
@@ -318,6 +331,15 @@ fun PlayerLayer(
             }
         }
 
+        if (carousel) {
+            CoverCarousel(
+                state = state, topPx = fullTop, itemWidthPx = fullW, screenWidthPx = W,
+                onSettle = actions.skipTo,
+                onTap = { immersive = !immersive },
+                onLongPress = { t -> haptics.longPress(); actions.onMore(t) },
+            )
+        }
+
         // ---- Queue panel ----
         if (e > 0.99f) {
             val q by animateFloatAsState(if (queueOpen) 1f else 0f, motion.responsive(), label = "queue")
@@ -332,6 +354,55 @@ fun PlayerLayer(
                         .glass(GlassMaterial.Elevated, RoundedCornerShape(topStart = Radius.xl, topEnd = Radius.xl), tint = Color(palette.accent)),
                 ) { queueContent { queueOpen = false } }
             }
+        }
+    }
+}
+
+/**
+ * Now Playing cover carousel: neighbours peek at the edges and shrink/dim with distance; settling
+ * on another cover skips to it. Mirrors the queue and follows external track changes.
+ */
+@Composable
+private fun CoverCarousel(
+    state: PlayerState,
+    topPx: Float,
+    itemWidthPx: Float,
+    screenWidthPx: Float,
+    onSettle: (Int) -> Unit,
+    onTap: () -> Unit,
+    onLongPress: (Track) -> Unit,
+) {
+    val density = LocalDensity.current
+    val items = state.queue.items
+    val current = state.queue.currentIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0))
+    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = current) { items.size }
+    val latestCurrent by androidx.compose.runtime.rememberUpdatedState(current)
+    LaunchedEffect(current) { if (pager.currentPage != current && !pager.isScrollInProgress) pager.animateScrollToPage(current) }
+    LaunchedEffect(pager) {
+        androidx.compose.runtime.snapshotFlow { pager.settledPage }.collect { p -> if (p != latestCurrent && p in items.indices) onSettle(p) }
+    }
+    val side = with(density) { ((screenWidthPx - itemWidthPx) / 2f).coerceAtLeast(0f).toDp() }
+    androidx.compose.foundation.pager.HorizontalPager(
+        state = pager,
+        modifier = Modifier.offset { IntOffset(0, topPx.roundToInt()) }.fillMaxWidth().height(with(density) { itemWidthPx.toDp() }),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = side),
+        pageSpacing = 14.dp,
+        key = { items[it].uid },
+    ) { page ->
+        val t = items[page].track
+        Box(
+            Modifier.fillMaxSize().graphicsLayer {
+                val d = kotlin.math.abs((pager.currentPage - page) + pager.currentPageOffsetFraction).coerceIn(0f, 1f)
+                val sc = 1f - 0.12f * d
+                scaleX = sc; scaleY = sc
+                alpha = 1f - 0.45f * d
+                shadowElevation = (1f - d) * 24.dp.toPx()
+                shape = RoundedCornerShape(22.dp)
+                clip = true
+            }.combinedClickable(onClick = onTap, onLongClick = { onLongPress(t) })
+                .semantics { contentDescription = "Cover ${page + 1} of ${items.size}: ${t.title}" },
+        ) {
+            Artwork(t.artworkUrl, t.id.value, Modifier.fillMaxSize(), shape = androidx.compose.ui.graphics.RectangleShape, decodeSize = 900)
         }
     }
 }
@@ -422,6 +493,8 @@ private fun MorphBar(
                 }) { _, dx -> total += dx }
             },
     ) {
+        // Liquid glass on Android 13+: the cover, blurred and refracted at the pane's edges.
+        com.arnav.music.ui.theme.LiquidGlassBackdrop(track.artworkUrl, track.id.value, Radius.l, alpha = 0.42f)
         Row(Modifier.fillMaxSize().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Spacer(Modifier.width(with(density) { artWidthPx.toDp() }))
             Spacer(Modifier.width(Space.m))

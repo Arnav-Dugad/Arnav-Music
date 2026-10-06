@@ -209,25 +209,26 @@ class YouTubeRepository(
         /** Bumped when track mapping changes so stale cached pages are refetched once. */
         private const val CACHE_VERSION = "v2|"
     }
+}
 
-    private fun YtVideo.toTrack(): Track {
-        val parsed = Formatters.parseYouTubeTitle(snippet.title, snippet.channelTitle)
-        val genres = MetadataEnricher.genres(snippet.title, snippet.tags, snippet.description)
-        return Track(
-            id = TrackId.youtube(id),
-            title = parsed.title,
-            artist = parsed.artist,
-            album = parsed.album,
-            credits = parsed.credits,
-            variant = com.arnav.music.domain.catalog.TrackClassifier.variant(snippet.channelTitle, snippet.title),
-            compilation = com.arnav.music.domain.catalog.TrackClassifier.isCompilation(snippet.title, Formatters.parseIsoDuration(contentDetails.duration)),
-            durationMs = Formatters.parseIsoDuration(contentDetails.duration),
-            artworkUrl = snippet.thumbnails.best() ?: "https://i.ytimg.com/vi/$id/hqdefault.jpg",
-            playbackRef = id,
-            channelId = snippet.channelId,
-            genres = genres,
-            energy = MetadataEnricher.energy(snippet.title, snippet.tags, genres),
-            year = MetadataEnricher.year(snippet.publishedAt),
-        )
-    }
+/** Maps a videos.list item to an Arnav track (label-title parsing, Song/Video variant, compilation flag). */
+internal fun YtVideo.toTrack(): Track {
+    val parsed = Formatters.parseYouTubeTitle(snippet.title, snippet.channelTitle)
+    val genres = MetadataEnricher.genres(snippet.title, snippet.tags, snippet.description)
+    return Track(
+        id = TrackId.youtube(id),
+        title = parsed.title,
+        artist = parsed.artist,
+        album = parsed.album,
+        credits = parsed.credits,
+        variant = com.arnav.music.domain.catalog.TrackClassifier.variant(snippet.channelTitle, snippet.title),
+        compilation = com.arnav.music.domain.catalog.TrackClassifier.isCompilation(snippet.title, Formatters.parseIsoDuration(contentDetails.duration)),
+        durationMs = Formatters.parseIsoDuration(contentDetails.duration),
+        artworkUrl = snippet.thumbnails.best() ?: "https://i.ytimg.com/vi/$id/hqdefault.jpg",
+        playbackRef = id,
+        channelId = snippet.channelId,
+        genres = genres,
+        energy = MetadataEnricher.energy(snippet.title, snippet.tags, genres),
+        year = MetadataEnricher.year(snippet.publishedAt),
+    )
 }

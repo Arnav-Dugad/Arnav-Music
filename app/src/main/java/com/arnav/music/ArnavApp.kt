@@ -17,6 +17,7 @@ import com.arnav.music.di.appModule
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
@@ -34,6 +35,23 @@ class ArnavApp : Application(), SingletonImageLoader.Factory {
         }
         // Cloud work is deferred off the launch path; the UI never waits on Firebase.
         val scope: CoroutineScope = get()
+        // Keep the home-screen widget in sync with playback (debounced; main thread for the player).
+        scope.launch {
+            val player: com.arnav.music.core.playback.PlaybackController = get()
+            player.state
+                .map { s -> listOf(s.current?.id?.value, s.current?.title, s.isPlaying, s.queue.hasNext) to s }
+                .distinctUntilChanged { a, b -> a.first == b.first }
+                .debounce(400)
+                .collect { (_, s) ->
+                    val t = s.current
+                    launch(Dispatchers.IO) {
+                        com.arnav.music.widget.ArnavWidget.refresh(
+                            this@ArnavApp, t?.title, t?.artist, t?.artworkUrl, s.isPlaying,
+                            t?.source == com.arnav.music.domain.model.SourceType.YOUTUBE, s.queue.hasNext,
+                        )
+                    }
+                }
+        }
         scope.launch(Dispatchers.Default) {
             val gate: FirebaseGate = get()
             gate.ensure()

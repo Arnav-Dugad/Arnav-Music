@@ -33,6 +33,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.automirrored.rounded.ViewList
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.GridView
@@ -107,6 +108,8 @@ fun LibraryScreen(vm: LibraryViewModel = koinViewModel()) {
     val hasLocal = remember(permissionTick) { app.hasLocalPermission() }
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { permissionTick++ }
     var sortOpen by remember { mutableStateOf(false) }
+    var importOpen by remember { mutableStateOf(false) }
+    if (importOpen) YouTubeImportSheet({ importOpen = false })
     val grid = layout == LibraryLayout.GRID
     val playingId = player.current?.id
 
@@ -132,6 +135,7 @@ fun LibraryScreen(vm: LibraryViewModel = koinViewModel()) {
                             LibrarySort.entries.forEach { s -> DropdownMenuItem(text = { Text(s.label, color = c.content) }, onClick = { vm.sort.value = s; sortOpen = false }) }
                         }
                     }
+                    ArnavIconButton(Icons.Rounded.CloudDownload, "Import from YouTube", { importOpen = true })
                     ArnavIconButton(Icons.Rounded.Add, "New playlist", { nav.openSheet(SheetRequest.CreatePlaylist(emptyList())) })
                 }
                 Spacer(Modifier.height(Space.m))
@@ -182,7 +186,7 @@ fun LibraryScreen(vm: LibraryViewModel = koinViewModel()) {
                 full { SectionLabel("Playlists") }
                 playlistItems(playlists, grid, layout)
                 if (playlists.isEmpty()) full {
-                    EmptyState(Icons.Rounded.LibraryMusic, "No playlists yet", "Create one, or save any queue as a playlist from the player.", action = "Create playlist", onAction = { nav.openSheet(SheetRequest.CreatePlaylist(emptyList())) })
+                    EmptyState(Icons.Rounded.LibraryMusic, "No playlists yet", "Create one, save any queue from the player, or bring your playlists over from YouTube.", action = "Import from YouTube", onAction = { importOpen = true })
                 }
             }
             LibraryTab.PLAYLISTS -> {

@@ -86,6 +86,8 @@ fun CommandPalette(onDismiss: () -> Unit) {
     val c = ArnavTheme.colors
     val nav = LocalNavigator.current
     val vm = LocalAppViewModel.current
+    val reveal = com.arnav.music.ui.LocalThemeReveal.current
+    fun animated(change: () -> Unit) { reveal?.run(change) ?: change() }
     var query by remember { mutableStateOf("") }
     var selected by remember { mutableIntStateOf(0) }
     val focus = remember { FocusRequester() }
@@ -99,11 +101,11 @@ fun CommandPalette(onDismiss: () -> Unit) {
             add(Command("Taste DNA", "Listening stats & recaps", Icons.Rounded.Insights, "stats dna recap") { nav.go(Routes.INSIGHTS) })
             add(Command("Listening timeline", "Take me back to a day", Icons.Rounded.Timeline, "history calendar") { nav.go(Routes.TIMELINE) })
             add(Command("Taste constellation", "Your musical universe", Icons.Rounded.Hub, "graph artists") { nav.go(Routes.CONSTELLATION) })
-            add(Command("Enable Glass", "Translucent, layered UI", Icons.Rounded.BlurOn, "glass on") { vm.setGlass(GlassLevel.FULL) })
-            add(Command("Disable Glass", "Pure, opaque surfaces", Icons.Rounded.BlurOff, "glass off pure") { vm.setGlass(GlassLevel.OFF) })
-            add(Command("Dark theme", "", Icons.Rounded.DarkMode, "theme night") { vm.setTheme(ThemeMode.DARK) })
-            add(Command("OLED black theme", "", Icons.Rounded.DarkMode, "theme amoled black") { vm.setTheme(ThemeMode.OLED) })
-            add(Command("Light theme", "", Icons.Rounded.LightMode, "theme day") { vm.setTheme(ThemeMode.LIGHT) })
+            add(Command("Enable Glass", "Translucent, layered UI", Icons.Rounded.BlurOn, "glass on") { animated { vm.setGlass(GlassLevel.FULL) } })
+            add(Command("Disable Glass", "Pure, opaque surfaces", Icons.Rounded.BlurOff, "glass off pure") { animated { vm.setGlass(GlassLevel.OFF) } })
+            add(Command("Dark theme", "", Icons.Rounded.DarkMode, "theme night") { animated { vm.setTheme(ThemeMode.DARK) } })
+            add(Command("OLED black theme", "", Icons.Rounded.DarkMode, "theme amoled black") { animated { vm.setTheme(ThemeMode.OLED) } })
+            add(Command("Light theme", "", Icons.Rounded.LightMode, "theme day") { animated { vm.setTheme(ThemeMode.LIGHT) } })
             add(Command("Shuffle liked songs", "", Icons.Rounded.Shuffle, "random play") { nav.go(Routes.collection(CollectionKind.LIKED, "shuffle")) })
             add(Command("Profile", "", Icons.Rounded.Person, "account") { nav.go(Routes.PROFILE) })
             add(Command("Settings", "", Icons.Rounded.Settings, "preferences") { nav.go(Routes.settings()) })
