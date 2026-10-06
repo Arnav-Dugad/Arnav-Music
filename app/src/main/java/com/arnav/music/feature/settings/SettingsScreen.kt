@@ -272,9 +272,13 @@ private fun PlaybackPage(vm: SettingsViewModel) {
             }
             ToggleRow("Endless radio", s.endlessRadio, { v -> vm.update { it.copy(endlessRadio = v) } }, "When the queue ends, keep going with songs picked for you")
             Divider()
+            ToggleRow("AI lyrics when none exist", s.autoAiLyrics, { v -> vm.update { it.copy(autoAiLyrics = v) } }, "Arnav AI listens to the song and writes timed lyrics when no other source has them (sends the audio to Google's Gemini; uses your daily AI limit)")
+            Divider()
             ToggleRow("Online lyrics (LRCLIB)", s.onlineLyrics, { v -> vm.update { it.copy(onlineLyrics = v) } }, "Fetches time-synced lyrics from LRCLIB, an open community database, when a song has none on this device. Saved after the first look-up")
         }
         SettingsGroup("YouTube", footer = "Song plays the official audio upload (\"Topic\" art track) and Video plays the music video — switch any time in Now Playing. YouTube always plays in its official embedded player, which stays visible; for background listening continue in YouTube Music.") {
+            ToggleRow("Crop cover-art videos", s.cropArtTracks, { v -> vm.update { it.copy(cropArtTracks = v) } }, "Song uploads that are just album art show as a clean square, without the black side bars")
+            Divider()
             ToggleRow("Prefer music videos", s.preferVideos, { v -> vm.update { it.copy(preferVideos = v) } }, "Off: songs first, like YouTube Music")
             Divider()
             ToggleRow("Replace unplayable videos", s.autoReplaceUnavailable, { v -> vm.update { it.copy(autoReplaceUnavailable = v) } }, "If an upload can't be embedded, play another upload of the same song")

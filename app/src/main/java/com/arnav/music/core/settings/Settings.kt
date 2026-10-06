@@ -94,6 +94,10 @@ data class AppSettings(
     val widgetMaterialYou: Boolean = true,
     /** When the queue ends, keep playing similar songs picked by the recommender. */
     val endlessRadio: Boolean = true,
+    /** When no lyrics are found anywhere, transcribe them with Arnav AI (Gemini) automatically. */
+    val autoAiLyrics: Boolean = true,
+    /** Crop the empty side bars of YouTube cover-art ("Topic") videos so only the square art shows. */
+    val cropArtTracks: Boolean = true,
 )
 
 class SettingsRepository(private val context: Context, scope: CoroutineScope) {
@@ -147,6 +151,8 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
         val autoTagLocal = booleanPreferencesKey("auto_tag_local")
         val widgetMaterialYou = booleanPreferencesKey("widget_material_you")
         val endlessRadio = booleanPreferencesKey("endless_radio")
+        val autoAiLyrics = booleanPreferencesKey("auto_ai_lyrics")
+        val cropArtTracks = booleanPreferencesKey("crop_art_tracks")
     }
 
     private inline fun <reified E : Enum<E>> Preferences.enum(key: Preferences.Key<String>, default: E): E =
@@ -208,6 +214,8 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
                 autoTagLocal = p[K.autoTagLocal] ?: d.autoTagLocal,
                 widgetMaterialYou = p[K.widgetMaterialYou] ?: d.widgetMaterialYou,
                 endlessRadio = p[K.endlessRadio] ?: d.endlessRadio,
+                autoAiLyrics = p[K.autoAiLyrics] ?: d.autoAiLyrics,
+                cropArtTracks = p[K.cropArtTracks] ?: d.cropArtTracks,
             )
         }
         .onEach { _loaded.value = true }
@@ -263,6 +271,8 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
             p[K.autoTagLocal] = s.autoTagLocal
             p[K.widgetMaterialYou] = s.widgetMaterialYou
             p[K.endlessRadio] = s.endlessRadio
+            p[K.autoAiLyrics] = s.autoAiLyrics
+            p[K.cropArtTracks] = s.cropArtTracks
         }
     }
 

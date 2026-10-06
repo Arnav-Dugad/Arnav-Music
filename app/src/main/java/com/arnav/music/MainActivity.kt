@@ -48,7 +48,8 @@ class MainActivity : ComponentActivity() {
                     PipSpec(
                         enabled = set.floatingPlayer && st.isPlaying && st.current != null,
                         playing = st.isPlaying,
-                        video = st.current?.source == SourceType.YOUTUBE,
+                        video = st.current?.source == SourceType.YOUTUBE &&
+                            !(set.cropArtTracks && st.current?.variant == com.arnav.music.domain.model.MediaVariant.SONG),
                         hasNext = st.queue.hasNext,
                     )
                 }.distinctUntilChanged().collect { spec ->
