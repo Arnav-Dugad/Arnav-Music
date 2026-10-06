@@ -121,8 +121,21 @@ jobs:
             **/build/test-results/
           if-no-files-found: ignore
 
+      - name: Release notes
+        id: notes
+        if: github.event_name != 'pull_request'
+        run: |
+          # Read from git so manual (workflow_dispatch) runs get notes too; drop trailer lines.
+          msg="$(git log -1 --format=%B | grep -vE '^(Co-Authored-By|Claude-Session):' || true)"
+          {
+            echo "text<<ARNAV_NOTES_EOF"
+            echo "$msg"
+            echo "ARNAV_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+          if echo "$msg" | grep -q '\[no-release\]'; then echo "skip=true" >> "$GITHUB_OUTPUT"; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
+
       - name: Publish GitHub Release
-        if: github.event_name != 'pull_request' && !contains(github.event.head_commit.message, '[no-release]')
+        if: github.event_name != 'pull_request' && steps.notes.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.apk.outputs.version }}
@@ -134,7 +147,7 @@ jobs:
             **Arnav Music ${{ steps.apk.outputs.version }}** — built from `${{ github.ref_name }}` @ `${{ github.sha }}`.
 
             ### What's new
-            ${{ github.event.head_commit.message }}
+            ${{ steps.notes.outputs.text }}
 
             Installed copies update themselves from this page (Settings → App updates).
 
