@@ -292,6 +292,8 @@ private fun AiPage(vm: SettingsViewModel) {
         SettingsGroup("Arnav AI", footer = "Arnav AI uses Gemini through Firebase AI Logic on the free tier. Songs are always chosen on your device — AI only interprets your words. If AI is off or unavailable, the on-device engine answers instead.") {
             ToggleRow("Cloud AI (Gemini)", s.aiEnabled, { v -> vm.update { it.copy(aiEnabled = v) } }, if (vm.cloudAvailable) "Free tier, with local fallback" else "Not configured in this build — on-device engine only")
             Divider()
+            ActionRowS("Reset recommendations", "Forget “not interested”, blocked artists and what the recommender has learned") { vm.resetRecommendations() }
+            Divider()
             ToggleRow("Personalize with my taste", s.aiPersonalization, { v -> vm.update { it.copy(aiPersonalization = v) } }, "Sends only your top artist names and style hints — never history or searches")
             Divider()
             ToggleRow("Explain recommendations", s.explanations, { v -> vm.update { it.copy(explanations = v) } })

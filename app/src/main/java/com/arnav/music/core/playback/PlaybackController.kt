@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.media3.common.MediaItem
@@ -18,6 +19,7 @@ import com.arnav.music.core.common.Log
 import com.arnav.music.core.db.ArnavDatabase
 import com.arnav.music.core.db.AudioFeaturesDao
 import com.arnav.music.core.db.AudioFeaturesEntity
+import com.arnav.music.core.repo.IntelligenceRepository
 import com.arnav.music.core.repo.LibraryRepository
 import com.arnav.music.core.settings.SettingsRepository
 import com.arnav.music.domain.audio.HarmonicMix
@@ -228,7 +230,7 @@ class PlaybackController(
         val s = _state.value
         finishSession(skipped = true)
         val nq = s.queue.next(repeatAll = s.repeat == RepeatMode.ALL)
-        if (nq == s.queue) { pause(); return }
+        if (nq == s.queue) { if (!continueWithRadio(onEmpty = ::pause)) pause(); return }
         _state.update { it.copy(queue = nq) }
         if (s.engine == Engine.LOCAL && nq.currentIndex in localRunStart until localRunStart + (controller?.mediaItemCount ?: 0) &&
             nq.current?.track?.source == SourceType.LOCAL) {
@@ -493,6 +495,7 @@ class PlaybackController(
             s.sleep == SleepTimer.EndOfTrack -> { _state.update { it.copy(isPlaying = false, sleep = null) }; return }
             s.repeat == RepeatMode.ONE -> { seekTo(0); play(); return }
             !s.queue.hasNext && s.repeat != RepeatMode.ALL -> {
+                if (continueWithRadio()) return
                 _state.update { it.copy(isPlaying = false, sleep = if (it.sleep == SleepTimer.EndOfQueue) null else it.sleep) }
                 return
             }
@@ -500,6 +503,45 @@ class PlaybackController(
         _state.update { it.copy(queue = it.queue.next(repeatAll = it.repeat == RepeatMode.ALL)) }
         startCurrent(true, natural = true)
     }
+
+    // region Endless radio
+    //
+    // When the queue runs out and Settings › Endless radio is on, ~10 recommendations seeded from the
+    // queue so far are appended and playback continues. YouTube rules hold: songs are only queued,
+    // and YouTube plays only in the visible in-app player — while the app is in the background just
+    // songs on this device are added (none → playback simply stops, as before).
+
+    private val intelligence: IntelligenceRepository by lazy { GlobalContext.get().get<IntelligenceRepository>() }
+    private var radioJob: Job? = null
+
+    /** Starts appending radio picks; returns false (caller stops as usual) when endless radio doesn't apply. */
+    private fun continueWithRadio(onEmpty: () -> Unit = {}): Boolean {
+        val s = _state.value
+        if (!settings.settings.value.endlessRadio || s.sleep == SleepTimer.EndOfQueue || s.queue.items.isEmpty()) return false
+        if (radioJob?.isActive == true) return true
+        val uid = s.queue.current?.uid
+        val recent = s.queue.items.map { it.track }
+        _state.update { it.copy(isBuffering = true) }
+        radioJob = scope.launch {
+            val background = !ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+            val picks = runCatching {
+                intelligence.endlessRadio(recent.takeLast(25), recent.map { it.id }.toSet(), localOnly = background)
+            }.getOrDefault(emptyList())
+            val now = _state.value
+            // The listener moved on meanwhile (picked something, cleared the queue): leave it alone.
+            if (now.queue.current?.uid != uid || now.queue.hasNext) { _state.update { it.copy(isBuffering = false) }; return@launch }
+            if (picks.isEmpty()) {
+                _state.update { it.copy(isPlaying = false, isBuffering = false) }
+                onEmpty()
+                return@launch
+            }
+            scope.launch { library.remember(picks.filter { it.source == SourceType.YOUTUBE }) }
+            _state.update { it.copy(queue = it.queue.append(picks).next()) }
+            startCurrent(autoplay = true, natural = true)
+        }
+        return true
+    }
+    // endregion
 
     // region Smart transitions
     //

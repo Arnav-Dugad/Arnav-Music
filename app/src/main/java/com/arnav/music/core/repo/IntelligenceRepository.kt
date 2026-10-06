@@ -5,6 +5,8 @@ import com.arnav.music.core.ai.AiOutcome
 import com.arnav.music.core.ai.AiUnavailableReason
 import com.arnav.music.core.common.Clock
 import com.arnav.music.core.common.NetworkMonitor
+import com.arnav.music.core.db.ArnavDatabase
+import com.arnav.music.core.recommend.RecommendationService
 import com.arnav.music.core.settings.SettingsRepository
 import com.arnav.music.core.youtube.YouTubeRepository
 import com.arnav.music.domain.ai.AiJson
@@ -36,6 +38,14 @@ import com.arnav.music.domain.model.Track
 import com.arnav.music.domain.model.TrackId
 import com.arnav.music.domain.provider.SearchFilter
 import com.arnav.music.domain.quota.QuotaState
+import com.arnav.music.domain.recommend.DailyMix
+import com.arnav.music.domain.recommend.Feedback
+import com.arnav.music.domain.recommend.ListeningContext
+import com.arnav.music.domain.recommend.Recommendation
+import android.content.Context
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.StateFlow
+import org.koin.core.context.GlobalContext
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
@@ -50,7 +60,17 @@ sealed interface HomeSection {
     data class ContinueListening(val tracks: List<Track>) : HomeSection { override val key = "continue" }
     data class MomentsRow(val moments: List<Moment>, val featured: Moment) : HomeSection { override val key = "moments" }
     data class MadeForYou(val mixes: List<SmartMix>) : HomeSection { override val key = "made" }
-    data class TrackShelf(override val key: String, val title: String, val subtitle: String?, val tracks: List<Track>, val reasons: Map<TrackId, Reason> = emptyMap()) : HomeSection
+    /** [captions]: one honest line per track ("Often follows Kesariya in your sessions"), shown under the artist. */
+    data class TrackShelf(
+        override val key: String,
+        val title: String,
+        val subtitle: String?,
+        val tracks: List<Track>,
+        val reasons: Map<TrackId, Reason> = emptyMap(),
+        val captions: Map<TrackId, String> = emptyMap(),
+    ) : HomeSection
+    /** "Daily Mix · Arijit Singh, Pritam" — taste clusters, each a familiar core with a few close new songs. */
+    data class DailyMixes(val mixes: List<DailyMix>) : HomeSection { override val key = "daily" }
     data class TimeMachine(val insight: TimeMachineInsight, val tracks: List<Track>) : HomeSection { override val key = "tm_${insight.kind}" }
     data class StartHere(val moods: List<Mood>) : HomeSection { override val key = "start" }
 }
@@ -80,6 +100,15 @@ class IntelligenceRepository(
     private val profileLock = Mutex()
     private var cachedProfile: Pair<Long, TasteProfile>? = null
     private val zone: ZoneId get() = ZoneId.systemDefault()
+
+    /** The on-device recommender (signals → models → candidates → bandit-weighted scoring → re-ranking). */
+    val recommendations: RecommendationService by lazy {
+        val koin = GlobalContext.get()
+        RecommendationService(koin.get<Context>(), koin.get<ArnavDatabase>(), library, youtube, settings, network, clock, koin.get<CoroutineScope>())
+    }
+
+    /** Bumps when explicit recommender feedback changes. */
+    val feedbackVersion: StateFlow<Int> get() = recommendations.feedbackVersion
 
     suspend fun profile(force: Boolean = false): TasteProfile = profileLock.withLock {
         val now = clock.now()
@@ -134,14 +163,20 @@ class IntelligenceRepository(
             out += HomeSection.StartHere(moods.ifEmpty { listOf(Mood.UPBEAT, Mood.CHILL, Mood.FOCUS, Mood.ENERGETIC) })
         }
 
-        // "Because you played …" — strongest recent artist, deterministic picks from known catalog.
-        val topRecentArtist = recentEvents.groupBy { it.artistKey }.maxByOrNull { (_, v) -> v.sumOf { it.listenedMs } }?.key
-        if (topRecentArtist != null) {
-            val anchor = recent.firstOrNull { it.artistKey == topRecentArtist }
-            val pool = library.allKnownTracks().filter { it.artistKey != topRecentArtist && it.isSingle() }
-            val similar = pool.filter { t -> anchor != null && (t.genres.intersect(anchor.genres.toSet()).isNotEmpty() || (t.energy != null && anchor.energy != null && abs(t.energy!! - anchor.energy!!) < 0.12f)) }
-            val ranked = recommender.rank(similar, profile, now, library.likedIds.value, anchor?.energy).take(12)
-            if (anchor != null && ranked.size >= 4) out += HomeSection.TrackShelf("because", "Because you played ${anchor.artist}", "Similar energy and style", ranked.map { it.track }, ranked.associate { it.track.id to it.reason })
+        // Recommender shelves: each item carries an honest one-line reason.
+        val showWhy = settings.settings.value.explanations
+        fun captions(recs: List<Recommendation>): Map<TrackId, String> =
+            if (showWhy) recs.associate { it.track.id to it.explanation.text } else emptyMap()
+        val ctx = ListeningContext.at(now, zone)
+        runCatching { recommendations.forYouNow(16) }.getOrNull()?.takeIf { it.size >= 4 }?.let { recs ->
+            out += HomeSection.TrackShelf("foryou", "For you right now", "Picked for ${ctx.label} and what you're playing", recs.map { it.track }, captions = captions(recs))
+        }
+        runCatching { recommendations.dailyMixes() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { out += HomeSection.DailyMixes(it) }
+        runCatching { recommendations.freshFinds(16) }.getOrNull()?.takeIf { it.size >= 4 }?.let { recs ->
+            out += HomeSection.TrackShelf("fresh", "Fresh finds", "New to you, close to your taste", recs.map { it.track }, captions = captions(recs))
+        }
+        runCatching { recommendations.rediscover(16) }.getOrNull()?.takeIf { it.size >= 4 }?.let { recs ->
+            out += HomeSection.TrackShelf("rediscover", "Rediscover", "Loved before, quiet lately", recs.map { it.track }, captions = captions(recs))
         }
 
         InsightsEngine.timeMachine(library.events(now - 400L * DAY), now, zone).firstOrNull()?.let { tm ->
@@ -149,7 +184,8 @@ class IntelligenceRepository(
             if (tracks.size >= 2) out += HomeSection.TimeMachine(tm, tracks)
         }
 
-        val local = library.localTracks.value
+        val feedback = runCatching { recommendations.feedback() }.getOrDefault(Feedback.None)
+        val local = library.localTracks.value.filter { feedback.allows(it) }
         if (local.isNotEmpty()) {
             val ranked = recommender.rank(local, profile, now, library.likedIds.value, discovery = 0.2f).take(14)
             out += HomeSection.TrackShelf("local", "From your device", "Plays in the background, offline", ranked.map { it.track })
@@ -157,15 +193,15 @@ class IntelligenceRepository(
 
         if (network.currentlyOnline() || youtube.quotaState() != QuotaState.NORMAL) {
             youtube.trending().getOrNull()?.takeIf { it.isNotEmpty() }?.let { trending ->
-                val ranked = recommender.rank(trending.filter { it.isSingle() }, profile, now, library.likedIds.value, discovery = 0.5f)
+                val ranked = recommender.rank(trending.filter { it.isSingle() && feedback.allows(it) }, profile, now, library.likedIds.value, discovery = 0.5f)
                 out += HomeSection.TrackShelf("trending", "Trending in music", "From YouTube's popular music chart", ranked.map { it.track }.take(20))
             }
         }
 
         // Late night → moments first; morning → continue first. Light, honest prioritisation.
-        val order = if (hour >= 21 || hour < 4) listOf("moments", "continue", "made", "because", "local", "start", "trending")
-        else listOf("continue", "moments", "made", "start", "because", "local", "trending")
-        out.sortedBy { s -> order.indexOf(s.key).let { if (it < 0) 50 else it } }.take(8)
+        val order = if (hour >= 21 || hour < 4) listOf("moments", "continue", "foryou", "daily", "made", "rediscover", "fresh", "local", "start", "trending")
+        else listOf("continue", "foryou", "daily", "moments", "made", "start", "fresh", "rediscover", "local", "trending")
+        out.sortedBy { s -> order.indexOf(s.key).let { if (it < 0) 50 else it } }.take(10)
     }
 
     fun featuredMoment(hour: Int, moods: Set<String>): Moment {
@@ -260,13 +296,49 @@ class IntelligenceRepository(
             if (fromSearch.size > 120) break
         }
         // Recommendations are singles only: no mixes, mashups, jukeboxes or hour-long sets.
-        val singles = (fromSearch + fromKnown).filter { it.isSingle() && (it.energy ?: 0f) <= maxEnergy }.distinctBy { it.id }
+        val feedback = runCatching { recommendations.feedback() }.getOrDefault(Feedback.None)
+        val singles = (fromSearch + fromKnown).filter { it.isSingle() && feedback.allows(it) && (it.energy ?: 0f) <= maxEnergy }.distinctBy { it.id }
         // Prefer official audio ("Topic") uploads when the same song appears more than once.
         val prefer = if (settings.settings.value.preferVideos) com.arnav.music.domain.model.MediaVariant.VIDEO else com.arnav.music.domain.model.MediaVariant.SONG
         val deduped = singles.groupBy { it.artistKey + "|" + it.title.lowercase().replace(Regex("""[^\p{L}\p{N}]"""), "") }
             .values.map { group -> group.minByOrNull { if (it.variant == prefer) 0 else if (it.variant == null) 1 else 2 }!! }
         return deduped to remote
     }
+
+    // ------------------------------------------------------------------ radio + feedback
+
+    /** Radio from any song: [seed] first, then ~25 recommendations (singles only, explained). */
+    suspend fun radio(seed: Track, limit: Int = 25): List<Track> {
+        val recs = runCatching { recommendations.radio(seed, limit) }.getOrDefault(emptyList())
+        return listOf(seed) + recs.map { it.track }
+    }
+
+    /** Recommendations with their reasons, for screens that show them. */
+    suspend fun radioWithReasons(seed: Track, limit: Int = 25): List<Recommendation> =
+        runCatching { recommendations.radio(seed, limit) }.getOrDefault(emptyList())
+
+    /** Radio from an artist (by [com.arnav.music.domain.model.ArtistKey]). */
+    suspend fun artistRadio(artistKey: String, limit: Int = 25): List<Track> =
+        runCatching { recommendations.artistRadio(artistKey, limit) }.getOrDefault(emptyList()).map { it.track }
+
+    /** Songs to append when the queue runs out (endless radio). */
+    suspend fun endlessRadio(recent: List<Track>, exclude: Set<TrackId>, localOnly: Boolean, limit: Int = 10): List<Track> =
+        runCatching { recommendations.continuation(recent, exclude, localOnly, limit) }.getOrDefault(emptyList()).map { it.track }
+
+    /** "Not interested": never recommend this song again. */
+    suspend fun notInterested(track: Track) = recommendations.notInterested(track)
+
+    /** "Don't recommend this artist". */
+    suspend fun blockArtist(artistKey: String) = recommendations.blockArtist(artistKey)
+
+    /** "More like this": weighs this song's neighbourhood up for a while. */
+    suspend fun moreLikeThis(track: Track) = recommendations.moreLikeThis(track)
+
+    /** Undo any of the three above (subject = track id or artist key). */
+    suspend fun clearFeedback(subject: String) = recommendations.clearFeedback(subject)
+
+    /** Settings › "Reset recommendations": forget feedback and the learned source blend. */
+    suspend fun resetRecommendations() = recommendations.resetLearning()
 
     fun explain(reason: Reason, track: Track): String = when (reason) {
         Reason.ARTIST_RETURNING -> "Because you've been returning to ${track.artist} lately."
@@ -303,7 +375,10 @@ class IntelligenceRepository(
         return keys.mapNotNull { k -> library.tracksByArtist(k).firstOrNull()?.artist }
     }
 
-    fun invalidate() { cachedProfile = null }
+    fun invalidate() {
+        cachedProfile = null
+        recommendations.invalidate()
+    }
 
     companion object {
         const val DAY = 86_400_000L

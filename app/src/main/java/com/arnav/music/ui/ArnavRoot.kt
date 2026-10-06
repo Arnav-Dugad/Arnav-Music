@@ -181,6 +181,7 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
             vm.message(if (ok) "Up Next reordered for smooth key and tempo changes" else "Harmonic mix needs at least 3 analyzed songs from this phone in Up Next")
         }
     }
+    val intelligence = org.koin.compose.koinInject<com.arnav.music.core.repo.IntelligenceRepository>()
     val navigator = remember(nav) {
         Navigator(
             nav,
@@ -378,6 +379,16 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
                 onShare = { navigator.share(s.track) },
                 onLyrics = { sheet = SheetRequest.Lyrics(s.track) },
                 onCredits = { scope.launch { expand.animateTo(0f, motion.cinematic()) }; navigator.go(Routes.credits(s.track.id.value)) },
+                onRadio = { scope.launch { val radio = intelligence.radio(s.track); if (radio.isNotEmpty()) vm.play(radio, 0) else vm.message("Not enough listening yet to build a radio for this song") } },
+                onMoreLikeThis = { scope.launch { intelligence.moreLikeThis(s.track); vm.message("You'll hear more like “${s.track.title.take(40)}”") } },
+                onNotInterested = {
+                    scope.launch { intelligence.notInterested(s.track) }
+                    vm.message("Won't recommend this song", "Undo") { scope.launch { intelligence.clearFeedback(s.track.id.value) } }
+                },
+                onBlockArtist = {
+                    scope.launch { intelligence.blockArtist(s.track.artistKey) }
+                    vm.message("Won't recommend ${s.track.artist.take(40)}", "Undo") { scope.launch { intelligence.clearFeedback(s.track.artistKey) } }
+                },
             )
             is SheetRequest.AddToPlaylist -> PlaylistPickerSheet(
                 playlists, onDismiss = { sheet = null },

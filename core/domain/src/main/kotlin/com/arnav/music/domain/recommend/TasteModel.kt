@@ -167,7 +167,6 @@ object TasteModelBuilder {
 
     fun build(input: RecInput, now: Long, artistKeys: ArtistKeyCache = ArtistKeyCache()): TasteModel {
         val events = input.events.sortedBy { it.startedAt }
-        val replays = Engagement.replays(events)
         val trackLong = HashMap<TrackId, Double>()
         val trackShort = HashMap<TrackId, Double>()
         val artistLong = HashMap<String, Double>()
@@ -195,16 +194,19 @@ object TasteModelBuilder {
         val n = events.size
         val tl = DoubleArray(n); val ts = DoubleArray(n); val posW = DoubleArray(n)
         val plays = IntArray(n); val early = IntArray(n); val pos = IntArray(n)
-        val lastAt = LongArray(n); val firstAt = LongArray(n)
+        val lastAt = LongArray(n); val firstAt = LongArray(n); val lastEnd = LongArray(n)
         val ctxW = DoubleArray(n * ListeningContext.COUNT)
         val ctxN = IntArray(n * ListeningContext.COUNT)
-        for ((i, e) in events.withIndex()) {
+        for (e in events) {
             val k = index.getOrPut(e.trackId) {
                 ids += e.trackId; artistOfTrack += e.artistKey
                 firstAt[ids.size - 1] = e.startedAt
                 ids.size - 1
             }
-            val w = Engagement.weight(e, replays[i])
+            // Replay: the same song again within the hour of finishing it (see Engagement.replays).
+            val replay = plays[k] > 0 && e.startedAt - lastEnd[k] <= Engagement.REPLAY_WINDOW_MS
+            lastEnd[k] = e.startedAt + e.listenedMs
+            val w = Engagement.weight(e, replay)
             val age = now - e.startedAt
             val dl = Decay.Long.factor(age)
             tl[k] += w * dl

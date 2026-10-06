@@ -1,5 +1,9 @@
 package com.arnav.music.ui.player
 
+import androidx.compose.material.icons.rounded.Block
+import androidx.compose.material.icons.rounded.ThumbDown
+import androidx.compose.material.icons.rounded.ThumbUp
+import androidx.compose.material.icons.rounded.Radio
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -118,6 +122,10 @@ fun TrackActionsSheet(
     onLyrics: () -> Unit,
     /** Opens the song's credits page; defaults to navigating there directly. */
     onCredits: (() -> Unit)? = null,
+    onRadio: (() -> Unit)? = null,
+    onMoreLikeThis: (() -> Unit)? = null,
+    onNotInterested: (() -> Unit)? = null,
+    onBlockArtist: (() -> Unit)? = null,
 ) {
     val c = ArnavTheme.colors
     val context = LocalContext.current
@@ -144,6 +152,10 @@ fun TrackActionsSheet(
         ActionRow(if (liked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder, if (liked) "Remove from liked" else "Like", act(onLike))
         ActionRow(Icons.AutoMirrored.Rounded.PlaylistAdd, "Add to playlist", onAddToPlaylist)
         ActionRow(Icons.Rounded.Person, "Go to ${track.artist}", act(onArtist))
+        onRadio?.let { ActionRow(Icons.Rounded.Radio, "Start radio", act(it)) }
+        onMoreLikeThis?.let { ActionRow(Icons.Rounded.ThumbUp, "More like this", act(it)) }
+        onNotInterested?.let { ActionRow(Icons.Rounded.ThumbDown, "Not interested", act(it)) }
+        onBlockArtist?.let { ActionRow(Icons.Rounded.Block, "Don't recommend ${track.artist}", act(it)) }
         ActionRow(Icons.Rounded.Lyrics, "Lyrics", onLyrics)
         ActionRow(Icons.Rounded.Groups, "Credits", act { if (onCredits != null) onCredits() else nav.go(Routes.credits(track.id.value)) })
         if (track.source == SourceType.LOCAL) ActionRow(Icons.Rounded.Edit, "Edit song info", { editing = true })

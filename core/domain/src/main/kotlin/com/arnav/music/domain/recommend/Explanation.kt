@@ -32,6 +32,7 @@ object Explain {
     fun heavyRotation() = Explanation(ExplanationKind.HEAVY_ROTATION, "In your heavy rotation this week")
     fun forYou() = Explanation(ExplanationKind.FOR_YOU, "Picked from your listening")
     fun newFromArtist(artist: String) = Explanation(ExplanationKind.NEW_FROM_ARTIST, "New to you · by $artist")
+    fun newInGenre(genre: String) = Explanation(ExplanationKind.NEW_DISCOVERY, "New to you · close to the ${genre.lowercase()} you play most")
     fun newNear(artist: String?) = Explanation(ExplanationKind.NEW_DISCOVERY, if (artist != null) "New to you · close to $artist" else "New to you")
 
     /** "Same key and tempo as …", "Harmonically close to …" — only the aspect that was actually measured. */

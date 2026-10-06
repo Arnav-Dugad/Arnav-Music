@@ -181,7 +181,19 @@ private fun Section(section: HomeSection, play: (List<Track>, Int, Boolean) -> U
             Spacer(Modifier.height(Space.m))
             LazyRow(contentPadding = PaddingValues(horizontal = Space.gutter), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                 itemsIndexed(section.tracks, key = { _, t -> t.id.value }) { i, t ->
-                    TrackCard(t, { play(section.tracks, i, false) }, onLongClick = { more(t) })
+                    // Artist on the first line, the honest reason ("Often follows …") on the second.
+                    val why = section.captions[t.id]
+                    TrackCard(t, { play(section.tracks, i, false) }, caption = why?.let { "${t.artist}\n$it" }, onLongClick = { more(t) })
+                }
+            }
+        }
+        is HomeSection.DailyMixes -> Column {
+            SectionHeader("Your daily mixes", subtitle = "Favourites grouped by what you play together, plus a few new songs")
+            Spacer(Modifier.height(Space.m))
+            LazyRow(contentPadding = PaddingValues(horizontal = Space.gutter), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
+                items(section.mixes, key = { it.id }) { mix ->
+                    val tracks = mix.tracks.map { it.track }
+                    MixCard(mix.title, mix.subtitle, tracks.mapNotNull { it.artworkUrl }.distinct().take(4), mix.id, { play(tracks, 0, false) })
                 }
             }
         }

@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 
 data class HomeUiState(
@@ -38,6 +39,10 @@ class HomeViewModel(
                 .distinctUntilChanged()
                 .debounce(600)
                 .collect { refresh() }
+        }
+        viewModelScope.launch {
+            // "Not interested" / "Don't recommend this artist" / "More like this" show up right away.
+            intelligence.feedbackVersion.drop(1).collect { refresh() }
         }
     }
 

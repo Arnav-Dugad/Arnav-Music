@@ -138,13 +138,16 @@ class ArtistKeyCache {
  * regexes). Keep one instance across refreshes; entries are keyed by id + title + length.
  */
 class SinglesCache(private val maxSize: Int = 60_000) {
-    private val cache = HashMap<String, Boolean>()
+    private class Entry(val title: String, val album: String?, val durationMs: Long?, val compilation: Boolean, val single: Boolean)
+    private val cache = HashMap<TrackId, Entry>()
+
+    @Synchronized
     fun isSingle(t: Track): Boolean {
-        val key = t.id.value + "\u0000" + t.title + "\u0000" + t.album + "\u0000" + t.durationMs + "\u0000" + t.compilation
-        cache[key]?.let { return it }
+        val e = cache[t.id]
+        if (e != null && e.title == t.title && e.album == t.album && e.durationMs == t.durationMs && e.compilation == t.compilation) return e.single
         if (cache.size >= maxSize) cache.clear()
         val v = !t.compilation && TrackClassifier.isSingle(listOfNotNull(t.title, t.album).joinToString(" "), t.durationMs)
-        cache[key] = v
+        cache[t.id] = Entry(t.title, t.album, t.durationMs, t.compilation, v)
         return v
     }
 }

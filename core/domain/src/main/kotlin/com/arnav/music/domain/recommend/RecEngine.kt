@@ -27,6 +27,8 @@ class RecEngine(
     private val prefer: MediaVariant? = MediaVariant.SONG,
     /** Share one across refreshes: the single/compilation check is regex-heavy. */
     private val singles: SinglesCache = SinglesCache(),
+    /** Share one across refreshes: the graph is rebuilt only when its inputs changed. */
+    private val graphCache: GraphCache = GraphCache(),
 ) {
     private val taste = model.taste
     private val feedback = model.input.feedback
@@ -46,7 +48,10 @@ class RecEngine(
     private val byArtist: Map<String, List<Track>> by lazy { candidates.values.groupBy { artistOf(it) } }
     private val unplayed: List<Track> by lazy { candidates.values.filter { !taste.played(it.id) && it.id !in taste.likes } }
     private val songKeys = HashMap<TrackId, String>()
-    private val graph: WalkGraph by lazy { buildGraph() }
+    private val graph: WalkGraph by lazy {
+        val key = listOf(model.index.committedEvents, model.index.tracks.sessionCount, candidates.keys.hashCode(), model.input.playlists.hashCode(), model.input.tracks.size)
+        graphCache.get(key) { buildGraph() }
+    }
     private val inUserPlaylist: Set<TrackId> by lazy { taste.playlistsOf.filterValues { l -> l.isNotEmpty() }.keys }
 
     // ------------------------------------------------------------------ surfaces
@@ -197,7 +202,8 @@ class RecEngine(
             val fresh = score(
                 Seeds(taste = core.take(15).map { it to 0.3 + taste.trackLongNorm(it) }, content = coreTracks.take(6), artists = topArtists.take(4).associateWith { 0.6 }),
                 plan,
-            ).filter { taste.familiarity(it.track.id) < 0.5 }.sortedByDescending { it.score }.take(perMix / 3)
+            ).filter { r -> taste.familiarity(r.track.id) < 0.5 && coreTracks.take(10).maxOfOrNull { model.similarity(it, r.track) }.let { it != null && it >= MIX_FIT } }
+                .sortedByDescending { it.score }.take(perMix / 3)
             val coreRecs = coreTracks.map { t -> Recommendation(t, 0.5 + taste.trackLongNorm(t.id), RecSource.COOCCURRENCE, fallbackExplanation(t)) }
             val combined = interleave(coreRecs.take(perMix - fresh.size), fresh)
             val ranked = finish(combined, perMix, artistGap = 2, maxPerArtist = maxOf(4, perMix / 3), lambda = 0.9, keepOrder = true)
@@ -212,7 +218,7 @@ class RecEngine(
                 if (topArtists.size > 3) append(" and more")
                 if (topGenre != null) append(" · ").append(topGenre.replaceFirstChar { it.uppercase() })
             }
-            mixes += DailyMix("mix_" + topArtists.take(2).joinToString("_"), title, subtitle, ranked, names)
+            mixes += DailyMix("mix${mixes.size}_" + topArtists.take(2).joinToString("_"), title, subtitle, ranked, names)
             if (mixes.size >= maxMixes) break
         }
         return mixes
@@ -475,8 +481,13 @@ class RecEngine(
             taste.artistAffinity(artistOf(t)) >= 0.5 -> Explain.sameArtist(t.artist, true)
             else -> {
                 val g = model.features(t).genres.maxByOrNull { taste.genreAffinity(listOf(it)) }
-                if (g != null && taste.genreAffinity(listOf(g)) >= 0.5) Explain.genre(g)
-                else if (!taste.played(id)) Explain.newNear(nearestKnownArtist(t)) else Explain.forYou()
+                val genreFits = g != null && taste.genreAffinity(listOf(g)) >= 0.5
+                when {
+                    !taste.played(id) && genreFits -> Explain.newInGenre(g!!)
+                    !taste.played(id) -> Explain.newNear(nearestKnownArtist(t))
+                    genreFits -> Explain.genre(g!!)
+                    else -> Explain.forYou()
+                }
             }
         }
     }
@@ -599,6 +610,8 @@ class RecEngine(
         const val DISCOVERY_TOP = 300
         const val DEDUPE_HEAD = 600
         const val REDISCOVER_TOP = 200
+        /** A new song joins a daily mix only when it sounds like the mix's core (content similarity). */
+        const val MIX_FIT = 0.35
         const val ARTIST_DIMS = 24
         const val GENRE_DIMS = 12
         val SESSION = RecSource.SESSION
@@ -611,5 +624,18 @@ class RecEngine(
         val DISCOVERY = RecSource.DISCOVERY
         val INTENT = RecSource.INTENT
         val SEED = RecSource.SEED
+    }
+}
+
+/** Keeps the last walk graph while the pool, playlists and committed sessions are unchanged. */
+class GraphCache {
+    private var key: Any? = null
+    private var graph: WalkGraph? = null
+
+    @Synchronized
+    fun get(key: Any, build: () -> WalkGraph): WalkGraph {
+        val g = graph
+        if (g != null && key == this.key) return g
+        return build().also { graph = it; this.key = key }
     }
 }

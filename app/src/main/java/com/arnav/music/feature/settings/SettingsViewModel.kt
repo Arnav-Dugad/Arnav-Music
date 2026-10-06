@@ -57,6 +57,7 @@ class SettingsViewModel(
     val storage: StateFlow<StorageInfo> = _storage.asStateFlow()
     private val _busy = MutableStateFlow<String?>(null)
     val busy: StateFlow<String?> = _busy.asStateFlow()
+    fun resetRecommendations() = viewModelScope.launch { intelligence.resetRecommendations(); _notice.value = "Recommendations reset" }
     private val _notice = MutableStateFlow<String?>(null)
     val notice: StateFlow<String?> = _notice.asStateFlow()
 
