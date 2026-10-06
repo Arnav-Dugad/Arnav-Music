@@ -1,0 +1,671 @@
+package com.arnav.music.ui.player
+
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.Bedtime
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.Lyrics
+import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.Repeat
+import androidx.compose.material.icons.rounded.RepeatOne
+import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.SpeakerGroup
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.util.lerp
+import androidx.compose.ui.viewinterop.AndroidView
+import com.arnav.music.core.playback.Engine
+import com.arnav.music.core.playback.PlaybackIssue
+import com.arnav.music.core.playback.PlayerState
+import com.arnav.music.core.playback.Progress
+import com.arnav.music.core.playback.RepeatMode
+import com.arnav.music.core.playback.YouTubeEngine
+import com.arnav.music.core.settings.AppSettings
+import com.arnav.music.domain.color.ArtworkPalette
+import com.arnav.music.domain.format.Formatters
+import com.arnav.music.domain.model.SourceType
+import com.arnav.music.domain.model.Track
+import com.arnav.music.ui.components.ArnavIconButton
+import com.arnav.music.ui.components.Artwork
+import com.arnav.music.ui.components.HeartButton
+import com.arnav.music.ui.components.PlayPauseButton
+import com.arnav.music.ui.components.SourceBadge
+import com.arnav.music.ui.components.rememberInteraction
+import com.arnav.music.ui.components.pressScale
+import com.arnav.music.ui.theme.ArnavTheme
+import com.arnav.music.ui.theme.GlassMaterial
+import com.arnav.music.ui.theme.Radius
+import com.arnav.music.ui.theme.Space
+import com.arnav.music.ui.theme.glass
+import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.options.IFramePlayerOptions
+import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.views.YouTubePlayerView
+import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
+
+/** Actions the player layer needs from the app. */
+class PlayerActions(
+    val togglePlay: () -> Unit,
+    val next: () -> Unit,
+    val previous: () -> Unit,
+    val seekTo: (Long) -> Unit,
+    val toggleShuffle: () -> Unit,
+    val cycleRepeat: () -> Unit,
+    val toggleLike: (Track) -> Unit,
+    val openArtist: (String) -> Unit,
+    val dismissIssue: () -> Unit,
+    val onMore: (Track) -> Unit,
+    val onSleep: () -> Unit,
+    val onShare: (Track) -> Unit,
+)
+
+/**
+ * The player's continuous spatial model. One progress value (0 = MorphBar, 1 = Now Playing)
+ * drives every element; the artwork / video surface is a single element that physically travels
+ * between both layouts — no screen swap.
+ */
+@Composable
+fun PlayerLayer(
+    state: PlayerState,
+    progress: Progress,
+    palette: ArtworkPalette,
+    settings: AppSettings,
+    liked: Boolean,
+    expand: Animatable<Float, AnimationVector1D>,
+    youtube: YouTubeEngine,
+    barBottomPx: Float,
+    contentLeftPx: Float,
+    wide: Boolean,
+    actions: PlayerActions,
+    queueContent: @Composable (onClose: () -> Unit) -> Unit,
+) {
+    val track = state.current ?: return
+    val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
+    val motion = ArnavTheme.motion
+    val haptics = ArnavTheme.haptics
+    val isYouTube = track.source == SourceType.YOUTUBE
+    var immersive by rememberSaveable { mutableStateOf(false) }
+    var queueOpen by rememberSaveable { mutableStateOf(false) }
+
+    fun animateTo(target: Float) = scope.launch {
+        if (target == 1f) haptics.navigate()
+        expand.animateTo(target, motion.cinematic())
+    }
+
+    BackHandler(enabled = expand.targetValue > 0.5f) {
+        when {
+            queueOpen -> queueOpen = false
+            immersive -> immersive = false
+            else -> animateTo(0f)
+        }
+    }
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val W = constraints.maxWidth.toFloat()
+        val H = constraints.maxHeight.toFloat()
+        val statusTop = WindowInsets.statusBars.getTop(density).toFloat()
+        val navBottom = WindowInsets.navigationBars.getBottom(density).toFloat()
+        val e = expand.value
+        val px = { dp: Float -> dp * density.density }
+
+        // ---- MorphBar geometry ----
+        val miniArtH = if (isYouTube) max(px(56f), 201f) else px(48f)
+        val miniArtW = if (isYouTube) miniArtH * 16f / 9f else miniArtH
+        val barH = miniArtH + px(16f)
+        val barLeft = contentLeftPx + px(8f)
+        val barRight = W - px(8f)
+        val barTop = barBottomPx - barH
+        val miniLeft = barLeft + px(8f)
+        val miniTop = barTop + px(8f)
+
+        // ---- Full geometry ----
+        val fullW: Float
+        val fullH: Float
+        val fullLeft: Float
+        val fullTop: Float
+        if (wide) {
+            val size = min(H * 0.62f, W * 0.42f)
+            fullW = size; fullH = if (isYouTube) size * 9f / 16f else size
+            fullLeft = W * 0.27f - size / 2f
+            fullTop = (H - fullH) / 2f
+        } else {
+            val maxW = W - px(if (isYouTube) 2 * 20f else 2 * 32f)
+            val size = if (isYouTube) maxW else min(maxW, (H - statusTop - navBottom) * 0.44f)
+            val scaleUp = if (immersive && !isYouTube) 1.08f else 1f
+            fullW = size * scaleUp; fullH = (if (isYouTube) size * 9f / 16f else size) * scaleUp
+            fullLeft = (W - fullW) / 2f
+            fullTop = statusTop + px(72f) + if (immersive) px(36f) else 0f
+        }
+
+        // ---- Now Playing sheet (under the travelling surface) ----
+        if (e > 0.001f) {
+            val sheetShift = (1f - e) * (H - barTop)
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        translationY = sheetShift
+                        alpha = (e * 1.6f).coerceAtMost(1f)
+                    }
+                    .clip(RoundedCornerShape(topStart = (1 - e) * 28.dp, topEnd = (1 - e) * 28.dp))
+                    .pointerInput(Unit) {
+                        val tracker = VelocityTracker()
+                        detectVerticalDragGestures(
+                            onDragStart = { tracker.resetTracking() },
+                            onDragEnd = {
+                                val v = tracker.calculateVelocity().y
+                                animateTo(if (v > 1200f || expand.value < 0.7f) 0f else 1f)
+                            },
+                            onDragCancel = { animateTo(1f) },
+                        ) { change, dy ->
+                            tracker.addPosition(change.uptimeMillis, change.position)
+                            if (dy < -18f && expand.value >= 0.99f && !queueOpen) { queueOpen = true; return@detectVerticalDragGestures }
+                            scope.launch { expand.snapTo((expand.value - dy / (H - barTop)).coerceIn(0f, 1f)) }
+                        }
+                    },
+            ) {
+                LivingBackdrop(palette, track.artworkUrl, track.id.value, settings.artworkMotion, settings.gyroParallax, intensity = if (immersive) 1.4f else 1f)
+                NowPlayingContent(
+                    track = track, state = state, progress = progress, palette = palette, liked = liked,
+                    artSpace = with(density) { fullH.toDp() }, artTopPx = fullTop, wide = wide, immersive = immersive,
+                    onCollapse = { animateTo(0f) }, actions = actions, onQueue = { queueOpen = true },
+                )
+            }
+        }
+
+        // ---- MorphBar ----
+        if (e < 0.999f) {
+            MorphBar(
+                track = track, state = state, progress = progress, liked = liked,
+                modifier = Modifier
+                    .offset { IntOffset(barLeft.roundToInt(), barTop.roundToInt()) }
+                    .requiredSize(with(density) { (barRight - barLeft).toDp() }, with(density) { barH.toDp() })
+                    .graphicsLayer { alpha = 1f - (e * 2.2f).coerceAtMost(1f); translationY = -e * px(40f) },
+                artWidthPx = miniArtW,
+                onExpand = { animateTo(1f) },
+                onDragExpand = { delta -> scope.launch { expand.snapTo((expand.value + delta / (H - barTop)).coerceIn(0f, 1f)) } },
+                onDragEnd = { v -> animateTo(if (v < -900f || expand.value > 0.25f) 1f else 0f) },
+                actions = actions,
+            )
+        }
+
+        // ---- The travelling surface: artwork (local) or the visible YouTube player ----
+        val left = lerp(miniLeft, fullLeft, e)
+        val top = lerp(miniTop, fullTop, e)
+        val scale = lerp(miniArtW / fullW, 1f, e)
+        val cornerFull = 22.dp
+        val cornerMini = with(density) { (px(10f) / scale).toDp() }
+        val corner = androidx.compose.ui.unit.lerp(cornerMini, cornerFull, e)
+        Box(
+            Modifier
+                .offset { IntOffset(left.roundToInt(), top.roundToInt()) }
+                .requiredSize(with(density) { fullW.toDp() }, with(density) { fullH.toDp() })
+                .graphicsLayer {
+                    transformOrigin = TransformOrigin(0f, 0f)
+                    scaleX = scale; scaleY = scale
+                    shadowElevation = e * 24.dp.toPx()
+                    shape = RoundedCornerShape(corner)
+                    clip = true
+                },
+        ) {
+            if (isYouTube) {
+                YouTubeSurface(youtube, Modifier.fillMaxSize())
+            } else {
+                TrackArtwork(
+                    track = track, index = state.queue.currentIndex,
+                    modifier = Modifier.fillMaxSize()
+                        .pointerInput(track.id, e >= 0.99f) {
+                            if (e < 0.99f) return@pointerInput
+                            var total = 0f
+                            detectHorizontalDragGestures(onDragEnd = {
+                                if (total < -120f) actions.next() else if (total > 120f) actions.previous()
+                                total = 0f
+                            }) { _, dx -> total += dx }
+                        }
+                        .combinedClickable(
+                            onClick = { if (expand.value < 0.5f) animateTo(1f) else immersive = !immersive },
+                            onLongClick = { haptics.longPress(); actions.onMore(track) },
+                        )
+                        .semantics {
+                            contentDescription = "Artwork for ${track.title}"
+                            customActions = listOf(
+                                CustomAccessibilityAction("Next track") { actions.next(); true },
+                                CustomAccessibilityAction("Previous track") { actions.previous(); true },
+                                CustomAccessibilityAction(if (immersive) "Exit immersive" else "Immersive mode") { immersive = !immersive; true },
+                            )
+                        },
+                )
+            }
+        }
+
+        // ---- Queue panel ----
+        if (e > 0.99f) {
+            val q by animateFloatAsState(if (queueOpen) 1f else 0f, motion.responsive(), label = "queue")
+            if (q > 0.001f) {
+                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f * q)).clickable(remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, null) { queueOpen = false })
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .fillMaxHeight(0.78f)
+                        .align(Alignment.BottomCenter)
+                        .graphicsLayer { translationY = (1f - q) * size.height }
+                        .glass(GlassMaterial.Elevated, RoundedCornerShape(topStart = Radius.xl, topEnd = Radius.xl), tint = Color(palette.accent)),
+                ) { queueContent { queueOpen = false } }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TrackArtwork(track: Track, index: Int, modifier: Modifier) {
+    val motion = ArnavTheme.motion
+    var lastIndex by remember { mutableStateOf(index) }
+    val forward = index >= lastIndex
+    LaunchedEffect(index) { lastIndex = index }
+    AnimatedContent(
+        targetState = track,
+        contentKey = { it.id },
+        transitionSpec = {
+            // Old cover retreats in depth; new cover arrives forward from the swipe direction.
+            val dir = if (forward) 1 else -1
+            (slideInHorizontally(motion.offsetSpring()) { (it * 0.25f * dir * motion.travel).toInt() } + scaleIn(motion.expressive(), 1.06f) + fadeIn(motion.fast())) togetherWith
+                (scaleOut(motion.fast(), 0.88f) + fadeOut(motion.fast()))
+        },
+        modifier = modifier,
+        label = "art",
+    ) { t ->
+        Artwork(t.artworkUrl, t.id.value, Modifier.fillMaxSize(), shape = androidx.compose.ui.graphics.RectangleShape, contentDescription = null, decodeSize = 1000)
+    }
+}
+
+/** One persistent official IFrame player. Lifecycle-aware: it stops when the app is hidden. */
+@Composable
+private fun YouTubeSurface(engine: YouTubeEngine, modifier: Modifier) {
+    val context = LocalContext.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val view = remember {
+        YouTubePlayerView(context).apply {
+            enableAutomaticInitialization = false
+            initialize(engine.listener, true, IFramePlayerOptions.Builder().controls(1).fullscreen(0).rel(0).build())
+        }
+    }
+    DisposableEffect(lifecycle) {
+        lifecycle.addObserver(view)
+        onDispose {
+            lifecycle.removeObserver(view)
+            engine.detach()
+            view.release()
+        }
+    }
+    AndroidView(factory = { view }, modifier = modifier.background(Color.Black))
+}
+
+@Composable
+private fun MorphBar(
+    track: Track,
+    state: PlayerState,
+    progress: Progress,
+    liked: Boolean,
+    modifier: Modifier,
+    artWidthPx: Float,
+    onExpand: () -> Unit,
+    onDragExpand: (Float) -> Unit,
+    onDragEnd: (Float) -> Unit,
+    actions: PlayerActions,
+) {
+    val c = ArnavTheme.colors
+    val motion = ArnavTheme.motion
+    val density = LocalDensity.current
+    val interaction = rememberInteraction()
+    val tracker = remember { VelocityTracker() }
+    Box(
+        modifier
+            .glass(GlassMaterial.Thick, RoundedCornerShape(Radius.l))
+            .pressScale(interaction, 0.985f)
+            .clickable(interaction, indication = null, onClickLabel = "Open player", onClick = onExpand)
+            .pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onDragStart = { tracker.resetTracking() },
+                    onDragEnd = { onDragEnd(tracker.calculateVelocity().y) },
+                    onDragCancel = { onDragEnd(0f) },
+                ) { change, dy ->
+                    tracker.addPosition(change.uptimeMillis, change.position)
+                    onDragExpand(-dy)
+                }
+            }
+            .pointerInput(track.id) {
+                var total = 0f
+                detectHorizontalDragGestures(onDragEnd = {
+                    if (total < -140f) actions.next() else if (total > 140f) actions.previous()
+                    total = 0f
+                }) { _, dx -> total += dx }
+            },
+    ) {
+        Row(Modifier.fillMaxSize().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Spacer(Modifier.width(with(density) { artWidthPx.toDp() }))
+            Spacer(Modifier.width(Space.m))
+            AnimatedContent(track, contentKey = { it.id }, transitionSpec = {
+                (fadeIn(motion.fast()) + slideInHorizontally { it / 6 }) togetherWith fadeOut(motion.fast())
+            }, modifier = Modifier.weight(1f), label = "bartitle") { t ->
+                Column {
+                    Text(t.title, style = ArnavTheme.type.titleSmall, color = c.content, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (t.source == SourceType.YOUTUBE) { SourceBadge(true); Spacer(Modifier.width(6.dp)) }
+                        Text(t.artist, style = ArnavTheme.type.bodySmall, color = c.contentMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+            HeartButton(liked, { actions.toggleLike(track) }, size = 20.dp)
+            PlayPauseButton(state.isPlaying, actions.togglePlay, size = 40.dp, container = c.content, content = c.background, buffering = state.isBuffering)
+            ArnavIconButton(Icons.Rounded.SkipNext, "Next", actions.next, enabled = state.queue.hasNext && state.capabilities.canSkip)
+        }
+        // Hairline progress along the bottom edge.
+        Box(Modifier.align(Alignment.BottomStart).padding(horizontal = 14.dp).fillMaxWidth().height(2.dp).clip(RoundedCornerShape(1.dp)).background(c.content.copy(alpha = 0.08f))) {
+            Box(Modifier.fillMaxWidth(progress.fraction).fillMaxHeight().background(c.accent))
+        }
+    }
+}
+
+@Composable
+private fun NowPlayingContent(
+    track: Track,
+    state: PlayerState,
+    progress: Progress,
+    palette: ArtworkPalette,
+    liked: Boolean,
+    artSpace: androidx.compose.ui.unit.Dp,
+    artTopPx: Float,
+    wide: Boolean,
+    immersive: Boolean,
+    onCollapse: () -> Unit,
+    actions: PlayerActions,
+    onQueue: () -> Unit,
+) {
+    val on = Color(palette.onBackdrop)
+    val muted = Color(palette.onBackdropMuted)
+    val accent = Color(palette.accent)
+    val motion = ArnavTheme.motion
+    val density = LocalDensity.current
+    val controlsAlpha by animateFloatAsState(if (immersive) 0f else 1f, motion.cinematic(), label = "immersive")
+    val context = LocalContext.current
+
+    Column(
+        Modifier.fillMaxSize().padding(WindowInsetsPaddingStatusNav()),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = Space.s), verticalAlignment = Alignment.CenterVertically) {
+            ArnavIconButton(Icons.Rounded.KeyboardArrowDown, "Collapse player", onCollapse, tint = on)
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("NOW PLAYING", style = ArnavTheme.type.overline, color = muted)
+                Text(if (track.source == SourceType.YOUTUBE) "via YouTube" else track.album ?: "On this device", style = ArnavTheme.type.caption, color = on, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            ArnavIconButton(Icons.Rounded.MoreHoriz, "More actions", { actions.onMore(track) }, tint = on)
+        }
+        if (wide) {
+            Row(Modifier.fillMaxSize()) {
+                Spacer(Modifier.weight(1f))
+                Column(Modifier.weight(1f).padding(end = Space.xxl).graphicsLayer { alpha = controlsAlpha }, verticalArrangement = Arrangement.Center) {
+                    Spacer(Modifier.weight(1f))
+                    MetaAndControls(track, state, progress, liked, on, muted, accent, actions, onQueue)
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+        } else {
+            val topPad = with(density) { (artTopPx).toDp() } - 64.dp - WindowInsetsTopDp()
+            Spacer(Modifier.height(topPad.coerceAtLeast(0.dp) + artSpace + Space.xl))
+            Column(Modifier.fillMaxWidth().padding(horizontal = 28.dp).graphicsLayer { alpha = controlsAlpha }) {
+                MetaAndControls(track, state, progress, liked, on, muted, accent, actions, onQueue)
+                if (track.source == SourceType.YOUTUBE) {
+                    Spacer(Modifier.height(Space.l))
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(Radius.m)).background(on.copy(alpha = 0.06f))
+                            .clickable {
+                                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://music.youtube.com/watch?v=${track.playbackRef}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                            }
+                            .padding(Space.m),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Rounded.Visibility, null, tint = muted, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(Space.s))
+                        Text("YouTube plays while Arnav Music is open. Continue in YouTube Music for background listening.", style = ArnavTheme.type.caption, color = muted, modifier = Modifier.weight(1f))
+                        Icon(Icons.Rounded.OpenInNew, "Open in YouTube Music", tint = on, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+        }
+    }
+    state.issue?.let { issue ->
+        IssueToast(issue, actions.dismissIssue)
+    }
+}
+
+@Composable
+private fun MetaAndControls(
+    track: Track, state: PlayerState, progress: Progress, liked: Boolean,
+    on: Color, muted: Color, accent: Color, actions: PlayerActions, onQueue: () -> Unit,
+) {
+    val motion = ArnavTheme.motion
+    Row(
+        Modifier.fillMaxWidth().pointerInput(track.id) {
+            var total = 0f
+            detectHorizontalDragGestures(onDragEnd = {
+                if (total < -120f) actions.next() else if (total > 120f) actions.previous()
+                total = 0f
+            }) { _, dx -> total += dx }
+        },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AnimatedContent(track, contentKey = { it.id }, transitionSpec = {
+            (fadeIn(motion.fast()) + slideInHorizontally(motion.offsetSpring()) { (it * 0.08f * motion.travel).toInt() }) togetherWith
+                (fadeOut(motion.fast()) + slideOutHorizontally(motion.offsetSpring()) { (-it * 0.08f * motion.travel).toInt() })
+        }, modifier = Modifier.weight(1f), label = "meta") { t ->
+            Column {
+                Text(t.title, style = ArnavTheme.type.headline, color = on, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(2.dp))
+                Text(t.artist, style = ArnavTheme.type.body, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { actions.openArtist(t.artist) })
+            }
+        }
+        HeartButton(liked, { actions.toggleLike(track) }, size = 26.dp, tint = on)
+    }
+    Spacer(Modifier.height(Space.l))
+    SeekBar(progress, state.capabilities.canSeek, accent, on, muted, actions.seekTo)
+    Spacer(Modifier.height(Space.m))
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+        ArnavIconButton(Icons.Rounded.Shuffle, if (state.queue.shuffled) "Shuffle on" else "Shuffle off", actions.toggleShuffle, tint = if (state.queue.shuffled) accent else muted)
+        ArnavIconButton(Icons.Rounded.SkipPrevious, "Previous", actions.previous, tint = on, size = 34.dp, enabled = state.capabilities.canSkip)
+        PlayPauseButton(state.isPlaying, actions.togglePlay, container = on, content = Color(0xFF0B0B0F).takeIf { on.red > 0.5f } ?: Color.White, buffering = state.isBuffering)
+        ArnavIconButton(Icons.Rounded.SkipNext, "Next", actions.next, tint = on, size = 34.dp, enabled = state.capabilities.canSkip && (state.queue.hasNext || state.repeat == RepeatMode.ALL))
+        ArnavIconButton(
+            if (state.repeat == RepeatMode.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
+            "Repeat ${state.repeat.name.lowercase()}", actions.cycleRepeat, tint = if (state.repeat != RepeatMode.OFF) accent else muted,
+        )
+    }
+    Spacer(Modifier.height(Space.m))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        val context = LocalContext.current
+        ArnavIconButton(Icons.Rounded.SpeakerGroup, "Output device", { openOutputSwitcher(context) }, tint = muted, size = 20.dp)
+        ArnavIconButton(Icons.Rounded.Lyrics, "Lyrics", { actions.onMore(track) }, tint = muted, size = 20.dp)
+        ArnavIconButton(Icons.Rounded.Bedtime, if (state.sleep != null) "Sleep timer on" else "Sleep timer", actions.onSleep, tint = if (state.sleep != null) accent else muted, size = 20.dp)
+        ArnavIconButton(Icons.AutoMirrored.Rounded.QueueMusic, "Queue", onQueue, tint = muted, size = 20.dp)
+    }
+    if (state.sleep != null) SleepCountdown(state.sleep, muted)
+}
+
+@Composable
+private fun SeekBar(progress: Progress, canSeek: Boolean, accent: Color, on: Color, muted: Color, onSeek: (Long) -> Unit) {
+    var dragging by remember { mutableStateOf<Float?>(null) }
+    val fraction = dragging ?: progress.fraction
+    val motion = ArnavTheme.motion
+    val thumb by animateFloatAsState(if (dragging != null) 1f else 0f, motion.responsive(), label = "thumb")
+    val haptics = ArnavTheme.haptics
+    Column {
+        BoxWithConstraints(
+            Modifier.fillMaxWidth().height(28.dp)
+                .semantics {
+                    contentDescription = "Seek bar, ${Formatters.duration(progress.positionMs)} of ${Formatters.duration(progress.durationMs)}"
+                }
+                .then(
+                    if (canSeek && progress.durationMs > 0) Modifier.pointerInput(progress.durationMs) {
+                        detectHorizontalDragGestures(
+                            onDragStart = { o -> dragging = (o.x / size.width).coerceIn(0f, 1f); haptics.select() },
+                            onDragEnd = { dragging?.let { onSeek((it * progress.durationMs).toLong()) }; dragging = null },
+                            onDragCancel = { dragging = null },
+                        ) { change, _ -> dragging = (change.position.x / size.width).coerceIn(0f, 1f) }
+                    }.pointerInput(progress.durationMs) {
+                        androidx.compose.foundation.gestures.detectTapGestures { o -> onSeek(((o.x / size.width).coerceIn(0f, 1f) * progress.durationMs).toLong()) }
+                    } else Modifier,
+                ),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            val h = lerpDp(4.dp, 8.dp, thumb)
+            Box(Modifier.fillMaxWidth().height(h).clip(RoundedCornerShape(4.dp)).background(on.copy(alpha = 0.16f)))
+            Box(Modifier.fillMaxWidth(fraction).height(h).clip(RoundedCornerShape(4.dp)).background(on))
+            Box(
+                Modifier.offset(x = maxWidth * fraction - 7.dp).size(14.dp).graphicsLayer { scaleX = 0.6f + 0.6f * thumb; scaleY = 0.6f + 0.6f * thumb; alpha = 0.4f + 0.6f * thumb }
+                    .clip(androidx.compose.foundation.shape.CircleShape).background(accent),
+            )
+        }
+        Row(Modifier.fillMaxWidth()) {
+            Text(Formatters.duration(dragging?.let { (it * progress.durationMs).toLong() } ?: progress.positionMs), style = ArnavTheme.type.numeric, color = muted)
+            Spacer(Modifier.weight(1f))
+            Text(if (progress.durationMs > 0) "-" + Formatters.duration(progress.durationMs - progress.positionMs) else "", style = ArnavTheme.type.numeric, color = muted)
+        }
+    }
+}
+
+private fun lerpDp(a: androidx.compose.ui.unit.Dp, b: androidx.compose.ui.unit.Dp, t: Float) = androidx.compose.ui.unit.lerp(a, b, t)
+
+@Composable
+private fun WindowInsetsPaddingStatusNav(): androidx.compose.foundation.layout.PaddingValues {
+    val d = LocalDensity.current
+    return androidx.compose.foundation.layout.PaddingValues(
+        top = with(d) { WindowInsets.statusBars.getTop(d).toDp() } + 8.dp,
+        bottom = with(d) { WindowInsets.navigationBars.getBottom(d).toDp() } + 8.dp,
+    )
+}
+
+@Composable
+private fun WindowInsetsTopDp(): androidx.compose.ui.unit.Dp {
+    val d = LocalDensity.current
+    return with(d) { WindowInsets.statusBars.getTop(d).toDp() } + 8.dp
+}
+
+private fun openOutputSwitcher(context: android.content.Context) {
+    runCatching {
+        if (android.os.Build.VERSION.SDK_INT >= 34) {
+            android.media.MediaRouter2.getInstance(context).showSystemOutputSwitcher()
+        } else {
+            context.startActivity(Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+    }
+}
+
+@Composable
+private fun IssueToast(issue: PlaybackIssue, onDismiss: () -> Unit) {
+    val text = when (issue) {
+        is PlaybackIssue.Unavailable -> "“${issue.title.take(40)}” isn't available here. Skipping…"
+        PlaybackIssue.YouTubePausedInBackground -> "Paused — YouTube can't play while Arnav Music is in the background."
+        PlaybackIssue.NetworkLost -> "Connection lost. Playback will resume when you're back online."
+        PlaybackIssue.NeedsNotificationPermission -> "Allow notifications to control local playback from the lock screen."
+    }
+    Box(Modifier.fillMaxSize().padding(bottom = 120.dp, start = Space.gutter, end = Space.gutter), contentAlignment = Alignment.BottomCenter) {
+        Row(
+            Modifier.widthIn(max = 520.dp).glass(GlassMaterial.Elevated, RoundedCornerShape(Radius.m)).clickable(onClick = onDismiss).padding(Space.m),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(text, style = ArnavTheme.type.bodySmall, color = ArnavTheme.colors.content, modifier = Modifier.weight(1f, fill = false))
+        }
+    }
+}
+
+@Composable
+private fun SleepCountdown(sleep: com.arnav.music.core.playback.SleepTimer, color: Color) {
+    val label = when (sleep) {
+        is com.arnav.music.core.playback.SleepTimer.Countdown -> {
+            var now by remember { mutableStateOf(System.currentTimeMillis()) }
+            LaunchedEffect(sleep) { while (true) { now = System.currentTimeMillis(); kotlinx.coroutines.delay(1_000) } }
+            "Sleep in " + Formatters.duration((sleep.endsAt - now).coerceAtLeast(0))
+        }
+        com.arnav.music.core.playback.SleepTimer.EndOfTrack -> "Sleep after this track"
+        com.arnav.music.core.playback.SleepTimer.EndOfQueue -> "Sleep after the queue"
+    }
+    Text(label, style = ArnavTheme.type.caption, color = color, modifier = Modifier.fillMaxWidth().padding(top = Space.xs), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+}
+
+@Suppress("unused") private fun Float.abs() = abs(this)
+@Suppress("unused") private val zero = Offset.Zero

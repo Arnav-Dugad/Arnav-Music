@@ -39,13 +39,13 @@ class CoreLogicTest {
     }
 
     @Test fun `sync merge last write wins and tombstones`() {
-        val local = listOf(
+        val local = listOf<SyncRecord<String>>(
             SyncRecord("a", "local-new", 200, dirty = true),
             SyncRecord("b", "local-old", 100, dirty = true),
             SyncRecord("c", "clean", 100),
             SyncRecord("d", null, 100, deleted = true, dirty = true),
         )
-        val remote = listOf(
+        val remote = listOf<SyncRecord<String>>(
             SyncRecord("a", "remote-old", 150),
             SyncRecord("b", "remote-new", 180),
             SyncRecord("c", "remote-newer", 120),
