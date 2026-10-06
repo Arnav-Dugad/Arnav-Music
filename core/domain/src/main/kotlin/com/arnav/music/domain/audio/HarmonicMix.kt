@@ -48,16 +48,11 @@ object HarmonicMix {
         if (analysed.size <= 1) return analysed.map { it.value } + rest
         val m = analysed.size
         val width = if (m > BEAM_LIMIT) 1 else beamWidth.coerceAtLeast(1)
-        val energies = analysed.mapNotNull { e -> e.energy.takeIf { it.isFinite() } }
-        val lo = energies.minOrNull() ?: 0f
-        val hi = energies.maxOrNull() ?: 0f
+        val ideal = idealEnergies(analysed.mapNotNull { e -> e.energy.takeIf { it.isFinite() } }, m)
 
         fun stepCost(prev: MixEntry<*>?, next: MixEntry<*>, position: Int): Double {
-            val p = if (m == 1) 0.0 else position.toDouble() / (m - 1)
             var c = if (prev == null) 0.0 else transitionCost(prev, next)
-            if (next.energy.isFinite() && hi - lo > 1e-3f) {
-                c += ARC_WEIGHT * abs(next.energy - (lo + (hi - lo) * arc(p)))
-            }
+            if (ideal != null && next.energy.isFinite()) c += ARC_WEIGHT * abs(next.energy - ideal[position])
             return c
         }
 
@@ -125,7 +120,30 @@ object HarmonicMix {
         return if (octave < direct) cost + OCTAVE_PENALTY else cost
     }
 
-    /** Energy target 0..1 over the set: 0.4 at the start, peak at 70 %, 0.5 at the end. */
+    /**
+     * The energy each slot should ideally have: the arc's shape (rise to a peak at 70 %, ease off)
+     * filled with the set's own energies by rank, so the target is always achievable and the
+     * search isn't lured into leaving all the quiet songs for a big drop at the end.
+     * Null when there's no energy spread to shape.
+     */
+    private fun idealEnergies(energies: List<Float>, slots: Int): DoubleArray? {
+        if (energies.size < 2 || slots < 2) return null
+        val sorted = energies.sorted()
+        if (sorted.last() - sorted.first() < 1e-3f) return null
+        val order = (0 until slots).sortedBy { arc(it.toDouble() / (slots - 1)) }
+        val out = DoubleArray(slots)
+        for ((rank, slot) in order.withIndex()) out[slot] = quantile(sorted, rank.toDouble() / (slots - 1))
+        return out
+    }
+
+    private fun quantile(sorted: List<Float>, q: Double): Double {
+        val pos = q.coerceIn(0.0, 1.0) * (sorted.size - 1)
+        val i = pos.toInt().coerceAtMost(sorted.size - 2)
+        val f = pos - i
+        return sorted[i] * (1 - f) + sorted[i + 1] * f
+    }
+
+    /** Arc shape over the set: 0.4 at the start, peak at 70 %, 0.5 at the end. */
     private fun arc(p: Double): Double =
         if (p <= 0.7) 0.4 + 0.6 * (p / 0.7) else 1.0 - 0.5 * ((p - 0.7) / 0.3)
 }

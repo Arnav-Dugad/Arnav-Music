@@ -3,6 +3,7 @@ package com.arnav.music.core.importer
 import android.content.Context
 import com.arnav.music.core.common.Clock
 import com.arnav.music.core.db.ArnavDatabase
+import com.arnav.music.core.db.ImportHistoryEntity
 import com.arnav.music.core.db.PendingMatchEntity
 import com.arnav.music.core.repo.LibraryRepository
 import com.arnav.music.core.youtube.YouTubeRepository
@@ -24,9 +25,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 
 /** Songs from Spotify/CSV imports still waiting for a YouTube match. */
 data class MatchProgress(
@@ -60,6 +64,9 @@ sealed interface MatchNowResult {
 
 enum class RunOutcome { DONE, BUDGET_SPENT, QUOTA, OFFLINE }
 
+/** [hidden] playlists were removed from the library; [kept] stayed because another import also brought them in. */
+data class UndoOutcome(val hidden: Int, val kept: Int)
+
 /**
  * Turns imported songs into playable tracks while spending as little YouTube quota as possible:
  *  1. at import time, every song is matched against songs on this device and tracks already known
@@ -92,8 +99,11 @@ class ImportMatcher(
 
     // ------------------------------------------------------------------ import
 
-    /** Creates one Arnav playlist per imported playlist, matching what it can for free, and queues the rest. */
-    suspend fun import(parsed: ParsedImport): FileImportSummary = withContext(Dispatchers.Default) {
+    /**
+     * Creates one Arnav playlist per imported playlist, matching what it can for free, and queues the
+     * rest. The import is recorded in the import history under [label] (usually the file name).
+     */
+    suspend fun import(parsed: ParsedImport, label: String? = null): FileImportSummary = withContext(Dispatchers.Default) {
         val index = LocalMatchIndex(library.localTracksSnapshot())
         val description = when (parsed.source) {
             ImportSource.SPOTIFY -> "Imported from Spotify"
@@ -125,7 +135,18 @@ class ImportMatcher(
             MatchWorker.schedule(context)
             MatchWorker.runOnce(context)
         }
-        FileImportSummary(parsed.source, results)
+        val summary = FileImportSummary(parsed.source, results)
+        runCatching {
+            val historyLabel = label?.takeIf { it.isNotBlank() }
+                ?: results.singleOrNull()?.name
+                ?: "${results.size} playlists"
+            library.recordImport(
+                source = if (parsed.source == ImportSource.SPOTIFY) SOURCE_SPOTIFY else SOURCE_CSV,
+                label = historyLabel, playlistIds = results.map { it.playlistId },
+                songCount = summary.total, matchedCount = summary.matched,
+            )
+        }
+        summary
     }
 
     /** Free: tracks already stored in Room (played, liked, searched or imported before). */
@@ -249,6 +270,87 @@ class ImportMatcher(
 
     private fun PendingMatchEntity.song() = ImportedSong(title, artist, album, durationMs.takeIf { it > 0 })
 
+    // ------------------------------------------------------------------ import history
+
+    val history: Flow<List<ImportHistoryEntity>> = library.importHistory()
+
+    /**
+     * Undoes an import: hides the playlists it created (songs kept, so it can be redone) and parks
+     * their songs still waiting for a match. A playlist that another, still-active import also brought
+     * in stays. Never touches playlists the user made: history only lists ids made by the import flows.
+     */
+    suspend fun undoImport(id: String): UndoOutcome? {
+        val entry = library.importHistoryEntry(id) ?: return null
+        if (entry.undone) return UndoOutcome(0, 0)
+        val ids = entry.ids()
+        val claimedElsewhere = library.importHistory().first()
+            .filter { it.id != id && !it.undone }
+            .flatMap { it.ids() }.toSet()
+        val candidates = ids.filter { it !in claimedElsewhere }
+        val parked = candidates.flatMap { pid -> dao.forPlaylist(pid).first() }
+        val hidden = library.hideImportedPlaylists(candidates)
+        val parkedForHidden = parked.filter { it.playlistId in hidden }
+        saveUndoSnapshot(id, hidden, parkedForHidden)
+        hidden.forEach { dao.deleteForPlaylist(it) }
+        library.saveImportHistory(entry.copy(undone = true))
+        return UndoOutcome(hidden = hidden.size, kept = ids.count { it in claimedElsewhere && library.playlistExists(it) })
+    }
+
+    /** Redoes an undone import: the hidden playlists come back and parked songs resume matching. */
+    suspend fun redoImport(id: String): Int? {
+        val entry = library.importHistoryEntry(id) ?: return null
+        if (!entry.undone) return 0
+        val snapshot = loadUndoSnapshot(id)
+        val restored = library.restoreImportedPlaylists(snapshot?.first ?: entry.ids())
+        val parked = snapshot?.second.orEmpty()
+        if (parked.isNotEmpty()) {
+            val restoredIds = parked.map { it.playlistId }.distinct().filter { library.playlistExists(it) }.toSet()
+            val rows = parked.filter { it.playlistId in restoredIds }
+            if (rows.isNotEmpty()) {
+                dao.insertAll(rows)
+                MatchWorker.schedule(context)
+                MatchWorker.runOnce(context)
+            }
+        }
+        prefs.edit().remove(KEY_UNDO_PREFIX + id).apply()
+        library.saveImportHistory(entry.copy(undone = false))
+        return restored
+    }
+
+    private fun ImportHistoryEntity.ids(): List<String> = playlistIds.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+
+    private fun saveUndoSnapshot(id: String, hidden: List<String>, parked: List<PendingMatchEntity>) {
+        val rows = JSONArray()
+        parked.forEach { r ->
+            rows.put(
+                JSONObject()
+                    .put("playlistId", r.playlistId).put("position", r.position).put("title", r.title).put("artist", r.artist)
+                    .put("album", r.album ?: "").put("durationMs", r.durationMs).put("attempts", r.attempts)
+                    .put("failed", r.failed).put("createdAt", r.createdAt),
+            )
+        }
+        val json = JSONObject().put("hidden", JSONArray(hidden)).put("pending", rows)
+        prefs.edit().putString(KEY_UNDO_PREFIX + id, json.toString()).apply()
+    }
+
+    private fun loadUndoSnapshot(id: String): Pair<List<String>, List<PendingMatchEntity>>? = runCatching {
+        val raw = prefs.getString(KEY_UNDO_PREFIX + id, null) ?: return null
+        val json = JSONObject(raw)
+        val hiddenJson = json.getJSONArray("hidden")
+        val hidden = (0 until hiddenJson.length()).map { hiddenJson.getString(it) }
+        val rowsJson = json.getJSONArray("pending")
+        val rows = (0 until rowsJson.length()).map { i ->
+            val o = rowsJson.getJSONObject(i)
+            PendingMatchEntity(
+                playlistId = o.getString("playlistId"), position = o.getInt("position"), title = o.getString("title"),
+                artist = o.getString("artist"), album = o.optString("album").takeIf { it.isNotEmpty() },
+                durationMs = o.optLong("durationMs"), attempts = o.optInt("attempts"), failed = o.optBoolean("failed"),
+                createdAt = o.optLong("createdAt"),
+            )
+        }
+        hidden to rows
+    }.getOrNull()
+
     // ------------------------------------------------------------------ daily cap
 
     private fun dailyRemaining(): Int {
@@ -265,6 +367,10 @@ class ImportMatcher(
 
     companion object {
         const val PREFS = "import_prefs"
+        const val SOURCE_SPOTIFY = "spotify"
+        const val SOURCE_CSV = "csv"
+        const val SOURCE_YOUTUBE = "youtube"
+        private const val KEY_UNDO_PREFIX = "undo_snapshot_"
         private const val KEY_DAY = "match_day"
         private const val KEY_SEARCHES = "match_searches"
         private const val BATCH = 20

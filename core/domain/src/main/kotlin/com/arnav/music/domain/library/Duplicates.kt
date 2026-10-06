@@ -88,3 +88,10 @@ object Duplicates {
         return "$artist|$title#" + Integer.toHexString(ids.hashCode())
     }
 }
+
+/** Where one version is used: Arnav playlists holding it, counted plays (30 s or more) and whether it's liked. */
+data class TrackUsage(val playlists: Int = 0, val plays: Int = 0, val liked: Boolean = false) {
+    companion object {
+        val NONE = TrackUsage()
+    }
+}

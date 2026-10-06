@@ -1,5 +1,7 @@
 package com.arnav.music.core.analysis
 
+import com.arnav.music.domain.audio.Camelot
+import com.arnav.music.domain.audio.KeyNames
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -8,8 +10,8 @@ object AudioFeatures {
     /** One envelope byte per this many milliseconds of audio. */
     const val ENVELOPE_STEP_MS = 500L
 
-    /** Bump when the analysis changes; older rows are then re-analyzed. */
-    const val VERSION = 1
+    /** Bump when the analysis changes; older rows are then re-analyzed. 2: key, intro, outro. */
+    const val VERSION = 2
 
     /** Short human label for an energy score, e.g. "High energy". */
     fun energyLabel(energy: Float): String = when {
@@ -18,9 +20,17 @@ object AudioFeatures {
         else -> "Low energy"
     }
 
-    /** "124 BPM · −9 LUFS · High energy"; parts that weren't measured are left out. */
-    fun describe(bpm: Float, loudnessDb: Float, energy: Float): String = buildList {
+    /** "8A · A minor"; empty when the key is unknown. */
+    fun keyLabel(key: Int): String =
+        if (!KeyNames.isValid(key)) "" else "${Camelot.code(key)} · ${KeyNames.name(key)}"
+
+    /** "124 BPM · 8A · A minor · −9 LUFS · High energy"; parts that weren't measured are left out. */
+    fun describe(bpm: Float, loudnessDb: Float, energy: Float, key: Int = KeyNames.UNKNOWN): String = buildList {
         if (bpm > 0f) add("${bpm.roundToInt()} BPM")
+        if (KeyNames.isValid(key)) {
+            add(Camelot.code(key))
+            add(KeyNames.name(key))
+        }
         if (loudnessDb > -69f) {
             val l = loudnessDb.roundToInt()
             add((if (l < 0) "−" else "") + "${abs(l)} LUFS")

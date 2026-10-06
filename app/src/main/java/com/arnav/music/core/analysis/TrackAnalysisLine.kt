@@ -12,7 +12,7 @@ import com.arnav.music.core.db.ArnavDatabase
 import com.arnav.music.ui.theme.ArnavTheme
 import org.koin.compose.koinInject
 
-/** "124 BPM · −9 LUFS · High energy" for an analysed local track; renders nothing otherwise. */
+/** "124 BPM · 8A · A minor · −9 LUFS · High energy" for an analysed local track; renders nothing otherwise. */
 @Composable
 fun TrackAnalysisLine(trackId: String, color: Color, modifier: Modifier = Modifier) {
     val db = koinInject<ArnavDatabase>()
@@ -20,7 +20,7 @@ fun TrackAnalysisLine(trackId: String, color: Color, modifier: Modifier = Modifi
     val text by produceState<String?>(null, trackId) {
         value = null
         dao.observe(trackId).collect { row ->
-            value = row?.takeIf { it.ok }?.let { AudioFeatures.describe(it.bpm, it.loudnessDb, it.energy) }
+            value = row?.takeIf { it.ok }?.let { AudioFeatures.describe(it.bpm, it.loudnessDb, it.energy, it.musicalKey) }
         }
     }
     val line = text ?: return

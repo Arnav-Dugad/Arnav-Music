@@ -1,5 +1,6 @@
 package com.arnav.music.ui.lyrics
 
+import com.arnav.music.core.analysis.rememberLoudness
 import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -151,7 +152,9 @@ fun LyricsPanel(
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues(),
 ) {
-    LyricsHost(track, live = true, progress, isPlaying, onSeek, on, muted, accent, modifier, contentPadding)
+    // On-device songs with analysis: the sung line swells very slightly with the song's loudness.
+    val level = rememberLoudness(track.id.value.takeIf { track.source == SourceType.LOCAL }, progress, isPlaying)
+    LyricsHost(track, live = true, progress, isPlaying, onSeek, on, muted, accent, modifier, contentPadding, loudness = { level.value })
 }
 
 /** All lyric lines at full opacity, without following playback (e.g. for a song that isn't playing). */
@@ -183,6 +186,7 @@ private fun LyricsHost(
     accent: Color,
     modifier: Modifier,
     contentPadding: PaddingValues,
+    loudness: () -> Float = { 0f },
 ) {
     val repo = koinInject<LyricsRepository>()
     val flow = remember(track.id) { repo.observe(track) }
@@ -271,6 +275,7 @@ private fun LyricsHost(
                             accent = accent,
                             contentPadding = contentPadding,
                             menu = menu,
+                            loudness = loudness,
                         )
                     } else {
                         val caption = when {
@@ -444,6 +449,7 @@ private fun SyncedLyrics(
     accent: Color,
     contentPadding: PaddingValues,
     menu: @Composable () -> Unit,
+    loudness: () -> Float = { 0f },
 ) {
     val motion = ArnavTheme.motion
     val haptics = ArnavTheme.haptics
@@ -572,6 +578,7 @@ private fun SyncedLyrics(
                         on = on,
                         style = lineStyle,
                         onTap = onTap,
+                        loudness = loudness,
                     )
                 }
             }
@@ -595,6 +602,7 @@ private fun LyricRow(
     on: Color,
     style: TextStyle,
     onTap: () -> Unit,
+    loudness: () -> Float = { 0f },
 ) {
     val alphaTarget = when {
         isActive -> 1f
@@ -620,8 +628,9 @@ private fun LyricRow(
             .fillMaxWidth()
             .graphicsLayer {
                 translationY = cascade.offsetFor(index)
-                scaleX = scale
-                scaleY = scale
+                val swell = if (isActive && !reduced) 1f + 0.035f * loudness().coerceIn(0f, 1f) else 1f
+                scaleX = scale * swell
+                scaleY = scale * swell
                 transformOrigin = TransformOrigin(0f, 0.5f)
                 alpha = lineAlpha
                 val radius = blurDp.dp.toPx()

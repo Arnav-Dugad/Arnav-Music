@@ -36,6 +36,9 @@ android {
         versionCode = ciRunNumber
         versionName = "1.0.$ciRunNumber"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Instrumented UI tests run under the Test Orchestrator: every test gets a fresh process
+        // and `pm clear` (fresh onboarding, settings and database), so tests are order-independent.
+        testInstrumentationRunnerArguments["clearPackageData"] = "true"
         vectorDrawables { useSupportLibrary = true }
 
         buildConfigField("String", "YOUTUBE_API_KEY", "\"${secret("YOUTUBE_API_KEY")}\"")
@@ -99,6 +102,7 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+        execution = "ANDROIDX_TEST_ORCHESTRATOR"
     }
 }
 
@@ -189,4 +193,9 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso)
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.compose.ui.test.junit4)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.rules)
+    androidTestImplementation(libs.androidx.test.uiautomator)
+    androidTestUtil(libs.androidx.test.orchestrator)
+    androidTestUtil(libs.androidx.test.services)
 }

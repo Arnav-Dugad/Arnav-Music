@@ -5,6 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.arnav.music.core.repo.IntelligenceRepository
 import com.arnav.music.core.repo.LibraryRepository
 import com.arnav.music.domain.intelligence.ConstellationGraph
+import com.arnav.music.domain.intelligence.Heatmap
+import com.arnav.music.domain.intelligence.HeatmapGrid
 import com.arnav.music.domain.intelligence.Recap
 import com.arnav.music.domain.intelligence.RecapPeriod
 import com.arnav.music.domain.intelligence.TasteDna
@@ -56,6 +58,10 @@ class InsightsViewModel(private val intelligence: IntelligenceRepository, privat
     /** Every milestone in a fixed order; achieved ones carry the time they were reached. */
     val milestones: StateFlow<List<Milestone>> = _milestones.asStateFlow()
 
+    private val _heatmap = MutableStateFlow<HeatmapGrid?>(null)
+    /** Last 53 weeks of listening, one square per local day. */
+    val heatmap: StateFlow<HeatmapGrid?> = _heatmap.asStateFlow()
+
     fun loadMilestones() = viewModelScope.launch {
         val events = library.events(0L)
         val zone = ZoneId.systemDefault()
@@ -63,6 +69,7 @@ class InsightsViewModel(private val intelligence: IntelligenceRepository, privat
         val (s, m) = withContext(Dispatchers.Default) { Milestones.streak(events, now, zone) to Milestones.compute(events, zone) }
         _streak.value = s
         _milestones.value = m
+        _heatmap.value = withContext(Dispatchers.Default) { Heatmap.build(events, LocalDate.now(zone), zone) }
     }
 
     fun loadDna() = viewModelScope.launch {

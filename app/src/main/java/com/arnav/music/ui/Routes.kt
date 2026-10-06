@@ -19,6 +19,8 @@ object Routes {
     const val SETTINGS = "settings"
     const val SETTINGS_PAGE = "settings/{page}"
     const val AUTH = "auth"
+    const val DUPLICATES = "duplicates"
+    const val IMPORTS = "imports"
 
     fun ai(q: String? = null) = "ai?q=" + Uri.encode(q.orEmpty())
     fun search(q: String? = null) = "search?q=" + Uri.encode(q.orEmpty())

@@ -22,9 +22,11 @@ import com.arnav.music.feature.ai.ArnavAiScreen
 import com.arnav.music.feature.auth.AuthScreen
 import com.arnav.music.feature.collection.ArtistScreen
 import com.arnav.music.feature.collection.CollectionScreen
+import com.arnav.music.feature.duplicates.DuplicatesScreen
 import com.arnav.music.feature.explore.ExploreScreen
 import com.arnav.music.feature.explore.SearchScreen
 import com.arnav.music.feature.home.HomeScreen
+import com.arnav.music.feature.imports.ImportHistoryScreen
 import com.arnav.music.feature.insights.ConstellationScreen
 import com.arnav.music.feature.insights.InsightsScreen
 import com.arnav.music.feature.insights.TimelineScreen
@@ -92,6 +94,8 @@ fun AppNavHost(nav: NavHostController) {
         screen(Routes.TIMELINE) { TimelineScreen() }
         screen(Routes.PROFILE) { ProfileScreen() }
         screen(Routes.AUTH) { AuthScreen() }
+        screen(Routes.DUPLICATES) { DuplicatesScreen() }
+        screen(Routes.IMPORTS) { ImportHistoryScreen() }
         screen(Routes.SETTINGS) { SettingsScreen(page = "") }
         screen(Routes.SETTINGS_PAGE, arguments = listOf(navArgument("page") { type = NavType.StringType })) {
             SettingsScreen(page = it.arguments?.getString("page").orEmpty())

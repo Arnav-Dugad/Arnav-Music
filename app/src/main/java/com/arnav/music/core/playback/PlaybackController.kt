@@ -15,15 +15,23 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.arnav.music.core.common.Clock
 import com.arnav.music.core.common.Log
+import com.arnav.music.core.db.ArnavDatabase
+import com.arnav.music.core.db.AudioFeaturesDao
+import com.arnav.music.core.db.AudioFeaturesEntity
 import com.arnav.music.core.repo.LibraryRepository
 import com.arnav.music.core.settings.SettingsRepository
+import com.arnav.music.domain.audio.HarmonicMix
+import com.arnav.music.domain.audio.MixEntry
+import com.arnav.music.domain.audio.TrackSections
 import com.arnav.music.domain.model.PlayEvent
 import com.arnav.music.domain.model.PlaybackCapabilities
 import com.arnav.music.domain.model.SourceType
 import com.arnav.music.domain.model.Track
+import com.arnav.music.domain.queue.QueueItem
 import com.arnav.music.domain.queue.QueueState
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.PlayerConstants
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,11 +40,26 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import org.koin.core.context.GlobalContext
+import kotlin.math.max
+import kotlin.math.min
 
 enum class Engine { NONE, LOCAL, YOUTUBE }
+
 enum class RepeatMode { OFF, ALL, ONE }
+
+/** Smart transitions: intros shorter than this aren't skipped; land this much before the music. */
+private const val SMART_MIN_INTRO_MS = 300L
+private const val SMART_INTRO_LEAD_MS = 150L
+/** Outro fades last at least this long (or the user's fade length when longer)… */
+private const val SMART_MIN_FADE_MS = 1_500L
+/** …and end this long before the file does, so the player doesn't reach the end first. */
+private const val SMART_END_MARGIN_MS = 250L
+/** Not worth fading when less than this is left. */
+private const val SMART_SHORTEST_FADE_MS = 400L
 
 sealed interface PlaybackIssue {
     /** [searching] while looking for another upload; [videoId] lets the UI hand off to YouTube Music. */
@@ -109,6 +132,18 @@ class PlaybackController(
     private var sessionStartedAt = 0L
     private var sessionListenedMs = 0L
     private var lastTickAt = 0L
+
+    // Smart transitions (local playback only) — see [smartTick] and [skipIntroOnNaturalStart].
+    private val featuresDao: AudioFeaturesDao by lazy { GlobalContext.get().get<ArnavDatabase>().audioFeatures() }
+    /** Intro/outro per local track id, refreshed whenever a track becomes current. */
+    private val sectionCache = HashMap<String, TrackSections>()
+    /** Queue uid the outro watcher last saw, and its position/seek count on the previous tick. */
+    private var smartUid: Long? = null
+    private var smartPrevPos = -1L
+    private var smartPrevSerial = 0
+    /** Counts seeks reported by the player (ours, the UI's, the notification's, Bluetooth…). */
+    private var seekSerial = 0
+    private var smartFadeJob: Job? = null
 
     init {
         youtube.events = this
@@ -188,6 +223,7 @@ class PlaybackController(
     }
 
     fun next() {
+        cancelSmartFade(restoreVolume = true)
         val s = _state.value
         finishSession(skipped = true)
         val nq = s.queue.next(repeatAll = s.repeat == RepeatMode.ALL)
@@ -209,6 +245,7 @@ class PlaybackController(
     }
 
     fun seekTo(positionMs: Long) {
+        cancelSmartFade(restoreVolume = true)
         when (_state.value.engine) {
             Engine.LOCAL -> controller?.seekTo(positionMs)
             Engine.YOUTUBE -> youtube.seekTo(positionMs / 1000f)
@@ -241,6 +278,7 @@ class PlaybackController(
     }
 
     fun clearQueue() {
+        cancelSmartFade(restoreVolume = true)
         finishSession(skipped = false)
         controller?.stop(); controller?.clearMediaItems()
         youtube.pause()
@@ -249,9 +287,58 @@ class PlaybackController(
         persistQueue()
     }
 
+    /**
+     * "Harmonic mix": reorders the upcoming queue like a DJ set — Camelot-compatible keys next to
+     * each other, small tempo changes, a gentle energy arc — starting from the song playing now.
+     * Played items and the current one stay put; only local songs with on-device analysis are
+     * reordered, everything else (YouTube, unanalysed files) follows in its previous order.
+     * Returns false and leaves the queue alone when fewer than 3 upcoming songs are analysed
+     * (or the queue changed while the order was being worked out).
+     */
+    suspend fun harmonicMix(): Boolean {
+        val snapshot = _state.value.queue
+        val current = snapshot.current ?: return false
+        val upcoming = snapshot.upNext
+        if (upcoming.size < 3) return false
+        val rows = HashMap<String, AudioFeaturesEntity>()
+        for (item in upcoming + current) {
+            val t = item.track
+            if (t.source != SourceType.LOCAL || rows.containsKey(t.id.value)) continue
+            val row = runCatching { featuresDao.get(t.id.value) }.getOrNull()
+            if (row != null && row.ok) rows[t.id.value] = row
+        }
+        fun entry(item: QueueItem): MixEntry<QueueItem> {
+            val row = if (item.track.source == SourceType.LOCAL) rows[item.track.id.value] else null
+            return if (row == null) MixEntry(item, analysed = false)
+            else MixEntry(item, bpm = row.bpm, key = row.musicalKey, energy = row.energy)
+        }
+        val entries = upcoming.map(::entry)
+        if (entries.count { it.analysed } < 3) return false
+        val start = entry(current).takeIf { it.analysed }
+        val ordered = withContext(Dispatchers.Default) { HarmonicMix.order(entries, start) }
+        val snapshotUids = snapshot.items.map { it.uid }
+        var applied = false
+        _state.update { s ->
+            val q = s.queue
+            // Bail out if the user edited the queue or moved on meanwhile.
+            applied = q.currentIndex == snapshot.currentIndex && q.items.map { it.uid } == snapshotUids
+            if (!applied) s else {
+                val items = q.items.take(q.currentIndex + 1) + ordered
+                s.copy(queue = q.copy(items = items, originalOrder = if (q.shuffled) q.originalOrder else items.map { it.uid }))
+            }
+        }
+        if (applied) onQueueEdited()
+        return applied
+    }
+
     // endregion
 
-    private fun startCurrent(autoplay: Boolean) {
+    /**
+     * Loads and (optionally) plays the current queue item. [natural] = the previous song simply
+     * finished (not a user pick), which lets smart transitions skip a silent/quiet intro.
+     */
+    private fun startCurrent(autoplay: Boolean, natural: Boolean = false) {
+        cancelSmartFade(restoreVolume = true)
         val s = _state.value
         val track = s.current ?: run { _state.update { it.copy(engine = Engine.NONE, isPlaying = false) }; return }
         beginSession(track)
@@ -260,7 +347,12 @@ class PlaybackController(
             SourceType.LOCAL -> {
                 youtube.pause()
                 _state.update { it.copy(engine = Engine.LOCAL, capabilities = PlaybackCapabilities.LocalMedia, isBuffering = true, isPlaying = autoplay) }
-                withController { c -> loadLocalRun(c, autoplay) }
+                val uid = s.queue.current?.uid
+                withController { c ->
+                    val introAt = if (natural && smartAllowed(track)) cachedIntroStart(track) else 0L
+                    loadLocalRun(c, autoplay, introAt ?: 0L)
+                    if (introAt == null && uid != null) skipIntroWhenLoaded(c, uid)
+                }
             }
             SourceType.YOUTUBE -> {
                 controller?.pause()
@@ -272,7 +364,7 @@ class PlaybackController(
         startProgressLoop()
     }
 
-    private fun loadLocalRun(c: MediaController, autoplay: Boolean) {
+    private fun loadLocalRun(c: MediaController, autoplay: Boolean, startMs: Long = 0L) {
         val q = _state.value.queue
         var start = q.currentIndex
         var end = q.currentIndex
@@ -280,7 +372,7 @@ class PlaybackController(
         while (end < q.items.lastIndex && q.items[end + 1].track.source == SourceType.LOCAL) end++
         localRunStart = start
         val items = q.items.subList(start, end + 1).map { it.track.toMediaItem() }
-        c.setMediaItems(items, q.currentIndex - start, 0L)
+        c.setMediaItems(items, q.currentIndex - start, startMs)
         c.repeatMode = if (_state.value.repeat == RepeatMode.ONE) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
         c.prepare()
         if (autoplay) fadeTo(c, play = true) else c.pause()
@@ -311,6 +403,8 @@ class PlaybackController(
     }
 
     private fun fadeTo(c: MediaController, play: Boolean) {
+        // A user play/pause wins over a smart outro fade; the ramp below starts from the current volume.
+        cancelSmartFade(restoreVolume = false)
         val fade = settings.settings.value.fadeMs.toLong()
         if (fade <= 0) { c.volume = 1f; if (play) c.play() else c.pause(); return }
         scope.launch {
@@ -368,7 +462,12 @@ class PlaybackController(
                 if (_state.value.sleep == SleepTimer.EndOfTrack && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
                     c.pause(); _state.update { it.copy(sleep = null) }
                 }
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) skipIntroOnNaturalStart(c)
             }
+        }
+
+        override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+            if (reason == Player.DISCONTINUITY_REASON_SEEK) seekSerial++
         }
 
         override fun onPlayerError(error: PlaybackException) {
@@ -390,8 +489,158 @@ class PlaybackController(
             }
         }
         _state.update { it.copy(queue = it.queue.next(repeatAll = it.repeat == RepeatMode.ALL)) }
-        startCurrent(true)
+        startCurrent(true, natural = true)
     }
+
+    // region Smart transitions
+    //
+    // Local playback only, while Settings › Smart transitions is on, using the intro/outro found by
+    // on-device analysis (AnalysisWorker):
+    // - Outro: when playback *naturally* crosses a song's analysed outro (its closing fade or
+    //   trailing silence), the volume fades out from there over min(time left, max(fadeMs, 1.5 s))
+    //   and the next item starts as if the song had ended — counted as a completed listen.
+    //   Never when the outro lies in the first half of the song, with repeat-one, with the
+    //   "end of track" sleep timer, without a next item, or when the position got there by a seek.
+    //   Any user action (play/pause, seek, skip, queue jump — also from the notification) cancels it.
+    // - Intro: when a song starts because the previous one finished (not a user pick or seek), and
+    //   it has more than 300 ms of silence/quiet intro, playback jumps to 150 ms before the music.
+    // YouTube playback is never touched.
+
+    private fun smartAllowed(track: Track?): Boolean =
+        track != null && track.source == SourceType.LOCAL && settings.settings.value.smartTransitions && _state.value.repeat != RepeatMode.ONE
+
+    private fun introTarget(sections: TrackSections): Long =
+        if (sections.introMs > SMART_MIN_INTRO_MS) sections.introMs - SMART_INTRO_LEAD_MS else 0L
+
+    /** Where a natural start should begin, or null when the track's sections aren't loaded yet. */
+    private fun cachedIntroStart(track: Track): Long? = sectionCache[track.id.value]?.let(::introTarget)
+
+    private suspend fun loadSections(track: Track): TrackSections? {
+        if (track.source != SourceType.LOCAL) return null
+        val row = runCatching { featuresDao.get(track.id.value) }.getOrNull()
+        val sections = if (row != null && row.ok) TrackSections(row.introMs, row.outroMs) else TrackSections.NONE
+        if (sectionCache.size > 256) sectionCache.clear()
+        sectionCache[track.id.value] = sections
+        return sections
+    }
+
+    /** Called when ExoPlayer moved on to the next song by itself. */
+    private fun skipIntroOnNaturalStart(c: MediaController) {
+        val item = _state.value.queue.current ?: return
+        if (!smartAllowed(item.track)) return
+        val target = cachedIntroStart(item.track)
+        when {
+            target == null -> skipIntroWhenLoaded(c, item.uid)
+            target > 0L && c.currentPosition < target -> c.seekTo(target)
+        }
+    }
+
+    /** Looks the intro up, then skips it — unless the song changed or someone seeked meanwhile. */
+    private fun skipIntroWhenLoaded(c: MediaController, uid: Long) {
+        val item = _state.value.queue.current?.takeIf { it.uid == uid } ?: return
+        if (!smartAllowed(item.track)) return
+        val serial = seekSerial
+        scope.launch {
+            val sections = loadSections(item.track) ?: return@launch
+            val target = introTarget(sections)
+            val s = _state.value
+            if (target <= 0L || s.engine != Engine.LOCAL || s.queue.current?.uid != uid || seekSerial != serial || !smartAllowed(item.track)) return@launch
+            if (c.currentPosition < target) c.seekTo(target)
+        }
+    }
+
+    /** Runs on every progress tick of local playback: refreshes sections and watches for the outro. */
+    private fun smartTick(c: MediaController, s: PlayerState, progress: Progress) {
+        val item = s.queue.current
+        if (item?.uid != smartUid) {
+            smartUid = item?.uid
+            smartPrevPos = -1L
+            smartPrevSerial = seekSerial
+            if (item != null && item.track.source == SourceType.LOCAL) {
+                val nextTrack = s.queue.items.getOrNull(s.queue.currentIndex + 1)?.track
+                scope.launch {
+                    loadSections(item.track)
+                    if (nextTrack != null) loadSections(nextTrack)
+                }
+            }
+            return
+        }
+        val prev = smartPrevPos
+        val prevSerial = smartPrevSerial
+        val pos = progress.positionMs
+        smartPrevPos = pos
+        smartPrevSerial = seekSerial
+        if (item == null || smartFadeJob != null || !smartAllowed(item.track)) return
+        if (!s.isPlaying || s.isBuffering || s.engine != Engine.LOCAL || s.sleep == SleepTimer.EndOfTrack) return
+        if (!s.queue.hasNext && s.repeat != RepeatMode.ALL) return
+        val outro = sectionCache[item.track.id.value]?.outroMs ?: return
+        val duration = progress.durationMs
+        if (outro <= 0L || duration <= 0L || outro < duration / 2 || outro >= duration) return
+        // Only a natural crossing: no seek since the last tick and a normal-sized step.
+        if (prev < 0L || prevSerial != seekSerial || prev >= outro || pos < outro || pos - prev > 2_000L) return
+        val fade = min(duration - pos - SMART_END_MARGIN_MS, max(settings.settings.value.fadeMs.toLong(), SMART_MIN_FADE_MS))
+        if (fade < SMART_SHORTEST_FADE_MS) return
+        startSmartFade(c, item.uid, pos, fade)
+    }
+
+    private fun startSmartFade(c: MediaController, uid: Long, fromPos: Long, fadeMs: Long) {
+        smartFadeJob?.cancel()
+        val steps = (fadeMs / 50L).toInt().coerceIn(8, 60)
+        smartFadeJob = scope.launch {
+            val from = c.volume
+            for (i in 1..steps) {
+                delay(fadeMs / steps)
+                val s = _state.value
+                val stillValid = s.engine == Engine.LOCAL && s.queue.current?.uid == uid && c.playWhenReady &&
+                    c.currentPosition >= fromPos - 1_000L && settings.settings.value.smartTransitions
+                if (!stillValid) {
+                    smartFadeJob = null
+                    c.volume = 1f
+                    return@launch
+                }
+                val t = i / steps.toFloat()
+                c.volume = from * (1f - t) * (1f - t) // ease-out: quick at first, gentle into silence
+            }
+            smartFadeJob = null
+            completeSmartOutro(c, uid)
+        }
+    }
+
+    /** Stops an outro fade in progress (user action); [restoreVolume] puts the volume back to 1. */
+    private fun cancelSmartFade(restoreVolume: Boolean) {
+        val job = smartFadeJob ?: return
+        smartFadeJob = null
+        job.cancel()
+        if (restoreVolume) controller?.volume = 1f
+    }
+
+    /** The outro fade finished: move on exactly as if the song had ended. */
+    private fun completeSmartOutro(c: MediaController, uid: Long) {
+        val s = _state.value
+        if (s.engine != Engine.LOCAL || s.queue.current?.uid != uid) { c.volume = 1f; return }
+        val nq = s.queue.next(repeatAll = s.repeat == RepeatMode.ALL)
+        finishSession(skipped = false, completedNaturally = true)
+        if (nq == s.queue) {
+            c.pause(); c.volume = 1f
+            _state.update { it.copy(isPlaying = false) }
+            return
+        }
+        _state.update { it.copy(queue = nq) }
+        val next = nq.current ?: return
+        val inRun = next.track.source == SourceType.LOCAL && nq.currentIndex in localRunStart until localRunStart + c.mediaItemCount
+        if (!inRun) {
+            c.volume = 1f
+            startCurrent(true, natural = true)
+            return
+        }
+        beginSession(next.track)
+        persistQueue()
+        val introAt = if (smartAllowed(next.track)) cachedIntroStart(next.track) else 0L
+        c.seekTo(nq.currentIndex - localRunStart, introAt ?: 0L)
+        if (introAt == null) skipIntroWhenLoaded(c, next.uid)
+        fadeTo(c, play = true)
+    }
+    // endregion
 
     // region YouTube events
     override fun onYtState(state: PlayerConstants.PlayerState) {
@@ -489,7 +738,11 @@ class PlaybackController(
                 if (s.isPlaying && !s.isBuffering && lastTickAt > 0) sessionListenedMs += (now - lastTickAt).coerceIn(0, 2_000)
                 lastTickAt = now
                 if (s.engine == Engine.LOCAL) {
-                    controller?.let { c -> _progress.value = Progress(c.currentPosition.coerceAtLeast(0), c.duration.takeIf { it > 0 } ?: (s.current?.durationMs ?: 0)) }
+                    controller?.let { c ->
+                        val p = Progress(c.currentPosition.coerceAtLeast(0), c.duration.takeIf { it > 0 } ?: (s.current?.durationMs ?: 0))
+                        _progress.value = p
+                        smartTick(c, _state.value, p)
+                    }
                 }
                 delay(if (s.isPlaying) 250 else 1_000)
             }

@@ -246,6 +246,8 @@ private fun PlaybackPage(vm: SettingsViewModel) {
             Divider()
             ToggleRow("Pause when headphones disconnect", s.pauseOnDisconnect, { v -> vm.update { it.copy(pauseOnDisconnect = v) } })
             Divider()
+            ToggleRow("Smart transitions", s.smartTransitions, { v -> vm.update { it.copy(smartTransitions = v) } }, "Analyzed songs fade out where their outro begins and the next one skips silence at its start")
+            Divider()
             ActionRowS("Open equalizer", "Uses your phone's built-in audio effects") {
                 runCatching {
                     context.startActivity(Intent(AudioEffect.ACTION_DISPLAY_AUDIO_EFFECT_CONTROL_PANEL)
@@ -257,6 +259,8 @@ private fun PlaybackPage(vm: SettingsViewModel) {
         }
         SettingsGroup("Floating player", footer = "Leaving the app mid-song shrinks the player into a small window above other apps. YouTube keeps playing only while that window is visible; closing it stops playback.") {
             ToggleRow("Picture-in-picture", s.floatingPlayer, { v -> vm.update { it.copy(floatingPlayer = v) } }, "Play, pause and skip right from the window")
+            Divider()
+            ToggleRow("Lyrics in the mini player", s.miniPlayerLyrics, { v -> vm.update { it.copy(miniPlayerLyrics = v) } }, "Shows the line being sung under the title when synced lyrics are available")
         }
         SettingsGroup("YouTube", footer = "Song plays the official audio upload (\"Topic\" art track) and Video plays the music video — switch any time in Now Playing. YouTube always plays in its official embedded player, which stays visible; for background listening continue in YouTube Music.") {
             ToggleRow("Prefer music videos", s.preferVideos, { v -> vm.update { it.copy(preferVideos = v) } }, "Off: songs first, like YouTube Music")

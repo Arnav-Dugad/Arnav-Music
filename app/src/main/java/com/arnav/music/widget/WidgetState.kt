@@ -96,6 +96,22 @@ internal data class WidgetSnapshot(
 /** Artwork shared by the now-playing widgets, keyed by its url. */
 internal data class WidgetArt(val url: String?, val bitmap: Bitmap?)
 
+/** What the lyrics widget shows. Only ever text: the widget never drives playback. */
+internal data class WidgetLyric(
+    val state: State,
+    val title: String? = null,
+    val artist: String? = null,
+    /** The line being sung (null before the first line / during a break → shown as a note). */
+    val current: String? = null,
+    val next: String? = null,
+) {
+    enum class State { NOTHING_PLAYING, LOADING, NO_LYRICS, UNSYNCED, SYNCED }
+
+    companion object {
+        val Idle = WidgetLyric(State.NOTHING_PLAYING)
+    }
+}
+
 /**
  * In-process source of truth for running widget compositions. Glance does not re-run `provideGlance`
  * while a session is alive, so the compositions collect these flows and re-render on change.
@@ -105,6 +121,13 @@ internal object WidgetBus {
     val snapshot: StateFlow<WidgetSnapshot?> = _snapshot.asStateFlow()
     private val _art = MutableStateFlow(WidgetArt(null, null))
     val art: StateFlow<WidgetArt> = _art.asStateFlow()
+    private val _lyric = MutableStateFlow<WidgetLyric?>(null)
+    /** Current/next synced lyric line for the lyrics widget; null until the app has computed one. */
+    val lyric: StateFlow<WidgetLyric?> = _lyric.asStateFlow()
+
+    fun publishLyric(l: WidgetLyric) {
+        _lyric.value = l
+    }
 
     /** Current snapshot, read from disk the first time (e.g. after process death). */
     fun current(context: Context): WidgetSnapshot = _snapshot.value ?: WidgetSnapshot.read(context).also { _snapshot.value = it }

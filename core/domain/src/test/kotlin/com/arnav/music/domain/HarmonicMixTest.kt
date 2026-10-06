@@ -76,7 +76,7 @@ class HarmonicMixTest {
         val energies = out.map { it.removePrefix("e").toInt() }
         val peakAt = energies.indexOf(8)
         assertTrue(energies.toString(), peakAt in 4..7)
-        assertTrue(energies.toString(), energies.first() in 2..5)
+        assertTrue(energies.toString(), energies.last() < 8 && energies.first() < 8)
         // Neighbours stay close: no jump over half the range.
         assertTrue(energies.toString(), energies.zipWithNext().all { (a, b) -> abs(a - b) <= 4 })
     }

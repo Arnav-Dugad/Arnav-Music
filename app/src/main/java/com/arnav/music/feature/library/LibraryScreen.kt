@@ -36,11 +36,13 @@ import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.automirrored.rounded.ViewList
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.PushPin
 import androidx.compose.material.icons.rounded.Shuffle
@@ -113,6 +115,7 @@ fun LibraryScreen(vm: LibraryViewModel = koinViewModel(), importVm: PlaylistImpo
     val hasLocal = remember(permissionTick) { app.hasLocalPermission() }
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { permissionTick++ }
     var sortOpen by remember { mutableStateOf(false) }
+    var moreOpen by remember { mutableStateOf(false) }
     var importOpen by remember { mutableStateOf(false) }
     var importChooserOpen by remember { mutableStateOf(false) }
     val matchProgress by importVm.progress.collectAsStateWithLifecycle()
@@ -121,6 +124,7 @@ fun LibraryScreen(vm: LibraryViewModel = koinViewModel(), importVm: PlaylistImpo
         onDismiss = { importChooserOpen = false },
         onYouTube = { importChooserOpen = false; importOpen = true },
         onOpenPlaylist = { id -> importChooserOpen = false; nav.go(Routes.collection(CollectionKind.PLAYLIST, id)) },
+        onHistory = { importChooserOpen = false; nav.go(Routes.IMPORTS) },
     )
     // Quiet daily refresh of playlists imported from YouTube: only when Google grants access without
     // asking (consent was given before). Never shows any sign-in or consent UI on its own.
@@ -158,8 +162,28 @@ fun LibraryScreen(vm: LibraryViewModel = koinViewModel(), importVm: PlaylistImpo
                             LibrarySort.entries.forEach { s -> DropdownMenuItem(text = { Text(s.label, color = c.content) }, onClick = { vm.sort.value = s; sortOpen = false }) }
                         }
                     }
-                    ArnavIconButton(Icons.Rounded.CloudDownload, "Import playlists", { importChooserOpen = true })
                     ArnavIconButton(Icons.Rounded.Add, "New playlist", { nav.openSheet(SheetRequest.CreatePlaylist(emptyList())) })
+                    // Import, import history and the duplicate finder share one menu so the title keeps its room.
+                    Box {
+                        ArnavIconButton(Icons.Rounded.MoreVert, "Import and library tools", { moreOpen = true })
+                        DropdownMenu(moreOpen, { moreOpen = false }, containerColor = c.surfaceRaised) {
+                            DropdownMenuItem(
+                                text = { Text("Import playlists", color = c.content) },
+                                leadingIcon = { Icon(Icons.Rounded.CloudDownload, null, tint = c.contentMuted) },
+                                onClick = { moreOpen = false; importChooserOpen = true },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Find duplicates", color = c.content) },
+                                leadingIcon = { Icon(Icons.Rounded.ContentCopy, null, tint = c.contentMuted) },
+                                onClick = { moreOpen = false; nav.go(Routes.DUPLICATES) },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Import history", color = c.content) },
+                                leadingIcon = { Icon(Icons.Rounded.History, null, tint = c.contentMuted) },
+                                onClick = { moreOpen = false; nav.go(Routes.IMPORTS) },
+                            )
+                        }
+                    }
                 }
                 Spacer(Modifier.height(Space.m))
                 Row(

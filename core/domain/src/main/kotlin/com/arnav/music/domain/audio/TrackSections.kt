@@ -27,7 +27,7 @@ data class TrackSections(val introMs: Long, val outroMs: Long) {
  */
 object SectionDetector {
     const val BLOCK_MS = 50L
-    const val INTRO_DB = 12.0
+    const val INTRO_DB = 18.0
     const val OUTRO_DB = 10.0
     const val MAX_INTRO_FRACTION = 0.2
     const val MIN_OUTRO_MS = 1_500L

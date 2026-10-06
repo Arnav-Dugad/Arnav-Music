@@ -45,6 +45,17 @@ class FileImporter(private val context: Context) {
         if (isZip) readZip(bytes) else PlaylistFiles.parse(name.ifBlank { "Imported playlist.csv" }, decode(bytes))
     }
 
+    /** The picked file's name ("Playlist1.json", "my_spotify_data.zip"), for the import history; null when unknown. */
+    suspend fun displayName(uri: Uri): String? = withContext(Dispatchers.IO) {
+        val fromProvider = runCatching {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (c.moveToFirst() && i >= 0 && !c.isNull(i)) c.getString(i) else null
+            }
+        }.getOrNull()
+        (fromProvider ?: uri.lastPathSegment?.substringAfterLast('/'))?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
     /**
      * Spotify sends its data export as a zip (Playlist1.json, Playlist2.json, YourLibrary.json, …);
      * Exportify's "export all" is a zip of CSV files. Other entries are ignored.

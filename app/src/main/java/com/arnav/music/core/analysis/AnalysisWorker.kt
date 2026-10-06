@@ -28,7 +28,7 @@ import org.koin.core.context.GlobalContext
 import java.util.concurrent.TimeUnit
 
 /**
- * Analyzes local songs on device (tempo, loudness, energy envelope) in small batches.
+ * Analyzes local songs on device (tempo, key, loudness, energy envelope, intro/outro) in small batches.
  * Periodic runs only happen while charging; [runNow] skips that constraint. Nothing leaves the phone.
  */
 class AnalysisWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
@@ -87,6 +87,10 @@ class AnalysisWorker(context: Context, params: WorkerParameters) : CoroutineWork
             decoded.samples, decoded.sampleRate, decoded.length,
             envelopeStepMs = AudioFeatures.ENVELOPE_STEP_MS, loudnessOffsetDb = offset,
         )
+        // Only the first AudioDecoder.MAX_SECONDS are decoded: a quiet stretch at the cut isn't the song's outro.
+        val decodedMs = decoded.length * 1000L / decoded.sampleRate
+        val knownMs = track.durationMs ?: 0L
+        val truncated = decodedMs >= (AudioDecoder.MAX_SECONDS - 1) * 1000L || (knownMs > 0L && knownMs > decodedMs + 3_000L)
         return AudioFeaturesEntity(
             trackId = track.id.value,
             bpm = a.tempo.bpm,
@@ -97,6 +101,9 @@ class AnalysisWorker(context: Context, params: WorkerParameters) : CoroutineWork
             analyzedAt = System.currentTimeMillis(),
             version = AudioFeatures.VERSION,
             ok = true,
+            musicalKey = a.key.key,
+            introMs = a.sections.introMs,
+            outroMs = if (truncated) 0L else a.sections.outroMs,
         )
     }
 

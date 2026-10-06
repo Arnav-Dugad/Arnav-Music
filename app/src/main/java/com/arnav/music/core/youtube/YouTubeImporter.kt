@@ -72,16 +72,25 @@ class YouTubeImporter(
     suspend fun import(token: String, selected: List<RemotePlaylist>, onProgress: (ImportProgress) -> Unit): ImportSummary {
         var tracksTotal = 0
         var skipped = 0
-        selected.forEachIndexed { index, pl ->
-            val read = readTracks(token, pl, index, selected.size, onProgress)
-            library.importPlaylist(
-                remoteId = pl.id,
-                name = pl.title,
-                description = "Imported from YouTube",
-                tracks = read.tracks,
-            )
-            tracksTotal += read.tracks.size
-            skipped += read.skipped
+        val ids = ArrayList<String>()
+        try {
+            selected.forEachIndexed { index, pl ->
+                val read = readTracks(token, pl, index, selected.size, onProgress)
+                ids += library.importPlaylist(
+                    remoteId = pl.id,
+                    name = pl.title,
+                    description = "Imported from YouTube",
+                    tracks = read.tracks,
+                )
+                tracksTotal += read.tracks.size
+                skipped += read.skipped
+            }
+        } finally {
+            // Recorded even when a later playlist fails, so the ones already copied can be undone.
+            if (ids.isNotEmpty()) {
+                val label = selected.singleOrNull()?.title ?: "${ids.size} YouTube playlists"
+                runCatching { library.recordImport(HISTORY_SOURCE, label, ids, tracksTotal + skipped, tracksTotal) }
+            }
         }
         return ImportSummary(selected.size, tracksTotal, skipped)
     }
@@ -95,7 +104,13 @@ class YouTubeImporter(
      * longer exists on YouTube, or comes back with no playable videos, is left untouched.
      * Costs about 1 unit per 50 songs; no searches.
      */
-    suspend fun refresh(token: String, remoteIds: Collection<String>? = null, onProgress: (ImportProgress) -> Unit = {}): RefreshSummary {
+    suspend fun refresh(
+        token: String,
+        remoteIds: Collection<String>? = null,
+        /** False for the quiet daily refresh, so it doesn't add an entry to the import history every day. */
+        record: Boolean = true,
+        onProgress: (ImportProgress) -> Unit = {},
+    ): RefreshSummary {
         val targets = library.importedYouTubePlaylists().filter { p ->
             val ref = p.remoteRef
             ref != null && (remoteIds == null || ref in remoteIds)
@@ -104,18 +119,28 @@ class YouTubeImporter(
         var tracksTotal = 0
         var skipped = 0
         var missing = 0
-        targets.forEachIndexed { index, p ->
-            val remoteId = p.remoteRef ?: return@forEachIndexed
-            val read = try {
-                readTracks(token, RemotePlaylist(remoteId, p.name, 0, null), index, targets.size, onProgress)
-            } catch (e: MusicError.Http) {
-                if (e.code == 404 || e.code == 403) { missing++; return@forEachIndexed } else throw e
+        val ids = ArrayList<String>()
+        val names = ArrayList<String>()
+        try {
+            targets.forEachIndexed { index, p ->
+                val remoteId = p.remoteRef ?: return@forEachIndexed
+                val read = try {
+                    readTracks(token, RemotePlaylist(remoteId, p.name, 0, null), index, targets.size, onProgress)
+                } catch (e: MusicError.Http) {
+                    if (e.code == 404 || e.code == 403) { missing++; return@forEachIndexed } else throw e
+                }
+                if (read.tracks.isEmpty()) { missing++; return@forEachIndexed }
+                ids += library.importPlaylist(remoteId = remoteId, name = p.name, description = p.description, tracks = read.tracks)
+                names += p.name
+                refreshed++
+                tracksTotal += read.tracks.size
+                skipped += read.skipped
             }
-            if (read.tracks.isEmpty()) { missing++; return@forEachIndexed }
-            library.importPlaylist(remoteId = remoteId, name = p.name, description = p.description, tracks = read.tracks)
-            refreshed++
-            tracksTotal += read.tracks.size
-            skipped += read.skipped
+        } finally {
+            if (record && ids.isNotEmpty()) {
+                val label = "Refresh: " + (names.singleOrNull() ?: "${ids.size} YouTube playlists")
+                runCatching { library.recordImport(HISTORY_SOURCE, label, ids, tracksTotal + skipped, tracksTotal) }
+            }
         }
         return RefreshSummary(refreshed, tracksTotal, skipped, missing)
     }
@@ -146,6 +171,8 @@ class YouTubeImporter(
     }
 
     private companion object {
+        /** Import-history source tag (see ImportHistoryEntity.source). */
+        const val HISTORY_SOURCE = "youtube"
         const val MAX_PAGES = 20
         /** Matches the playlist sync limit. */
         const val MAX_TRACKS = 500

@@ -173,6 +173,13 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
     val snackbar = remember { SnackbarHostState() }
     val palette = com.arnav.music.ui.theme.LocalArtworkPalette.current ?: com.arnav.music.domain.color.ArtworkPalette.neutral(surfaceMode(settings))
 
+    // Reorders Up Next by key compatibility, tempo and energy (songs on this phone that were analyzed).
+    val harmonicMix: () -> Unit = {
+        scope.launch {
+            val ok = vm.player.harmonicMix()
+            vm.message(if (ok) "Up Next reordered for smooth key and tempo changes" else "Harmonic mix needs at least 3 analyzed songs from this phone in Up Next")
+        }
+    }
     val navigator = remember(nav) {
         Navigator(
             nav,
@@ -285,7 +292,7 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
                             togglePlay = vm.player::togglePlay, next = vm.player::next, previous = vm.player::previous,
                             toggleLike = { vm.toggleLike(it) },
                             openArtist = { navigator.go(Routes.artist(it)) },
-                            queue = { QueuePanel(state, vm.player::move, vm.player::removeAt, { vm.player.skipTo(it) }, { vm.saveQueueAsPlaylist() }, {}, onShuffle = vm.player::toggleShuffle) },
+                            queue = { QueuePanel(state, vm.player::move, vm.player::removeAt, { vm.player.skipTo(it) }, { vm.saveQueueAsPlaylist() }, {}, onShuffle = vm.player::toggleShuffle, onHarmonicMix = harmonicMix) },
                         )
                     }
                 }
@@ -322,7 +329,7 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
                     launchOrigin = launchOrigin,
                     onLaunchConsumed = { launchOrigin = null },
                     queueContent = { close ->
-                        QueuePanel(state, vm.player::move, vm.player::removeAt, { vm.player.skipTo(it) }, { vm.saveQueueAsPlaylist() }, close, onShuffle = vm.player::toggleShuffle)
+                        QueuePanel(state, vm.player::move, vm.player::removeAt, { vm.player.skipTo(it) }, { vm.saveQueueAsPlaylist() }, close, onShuffle = vm.player::toggleShuffle, onHarmonicMix = harmonicMix)
                     },
                 )
             }

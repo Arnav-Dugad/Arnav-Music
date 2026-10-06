@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.OndemandVideo
 import androidx.compose.material.icons.rounded.Sync
@@ -98,7 +99,10 @@ class PlaylistImportViewModel(
         if (_file.value == FileImportUi.Reading) return
         _file.value = FileImportUi.Reading
         viewModelScope.launch {
-            runCatching { matcher.import(files.read(uri)) }
+            runCatching {
+                val parsed = files.read(uri)
+                matcher.import(parsed, label = runCatching { files.displayName(uri) }.getOrNull())
+            }
                 .onSuccess { _file.value = FileImportUi.Done(it) }
                 .onFailure { e ->
                     _file.value = FileImportUi.Failed(
@@ -131,7 +135,7 @@ class PlaylistImportViewModel(
     /** Refreshes in the background with a token used only for this call; failures stay silent. */
     fun refreshQuietly(token: String) {
         markRefreshChecked()
-        viewModelScope.launch { runCatching { youtubeImporter.refresh(token) } }
+        viewModelScope.launch { runCatching { youtubeImporter.refresh(token, record = false) } }
     }
 
     private companion object {
@@ -146,6 +150,7 @@ fun ImportPlaylistsSheet(
     onDismiss: () -> Unit,
     onYouTube: () -> Unit,
     onOpenPlaylist: (String) -> Unit,
+    onHistory: (() -> Unit)? = null,
     vm: PlaylistImportViewModel = koinViewModel(),
 ) {
     val c = ArnavTheme.colors
@@ -179,6 +184,16 @@ fun ImportPlaylistsSheet(
                             "Songs already on this phone match instantly. The rest are matched to YouTube uploads a few at a time in the background.",
                             style = ArnavTheme.type.caption, color = c.contentSubtle,
                         )
+                        if (onHistory != null) {
+                            Row(
+                                Modifier.clip(RoundedCornerShape(Radius.s)).clickable(role = Role.Button, onClick = onHistory).padding(vertical = Space.s, horizontal = Space.xs),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(Icons.Rounded.History, null, tint = c.accent, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(Space.s))
+                                Text("Import history · undo an import", style = ArnavTheme.type.label, color = c.accent)
+                            }
+                        }
                     }
                     FileImportUi.Reading -> Column(verticalArrangement = Arrangement.spacedBy(Space.m)) {
                         Text("Reading your file…", style = ArnavTheme.type.body, color = c.content)
