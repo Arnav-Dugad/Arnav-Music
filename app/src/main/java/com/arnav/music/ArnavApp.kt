@@ -8,12 +8,14 @@ import coil3.disk.DiskCache
 import coil3.memory.MemoryCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
+import com.arnav.music.core.chapters.chaptersModule
 import com.arnav.music.core.firebase.Analytics
 import com.arnav.music.core.firebase.CloudSync
 import com.arnav.music.core.firebase.FirebaseGate
 import com.arnav.music.core.firebase.RemoteConfigRepository
 import com.arnav.music.core.settings.SettingsRepository
 import com.arnav.music.di.appModule
+import com.arnav.music.widget.LyricsWidget
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -31,7 +33,7 @@ class ArnavApp : Application(), SingletonImageLoader.Factory {
         super.onCreate()
         startKoin {
             androidContext(this@ArnavApp)
-            modules(appModule)
+            modules(appModule, chaptersModule)
         }
         // Cloud work is deferred off the launch path; the UI never waits on Firebase.
         val scope: CoroutineScope = get()
@@ -59,6 +61,8 @@ class ArnavApp : Application(), SingletonImageLoader.Factory {
                     }
                 }
         }
+        // Lyrics widget: publishes the current/next synced line, only while one is placed.
+        LyricsWidget.Feed.start(this, scope)
         // Refresh the "Your week" widget whenever the app goes to the background (no-op when not placed).
         androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
             override fun onStop(owner: androidx.lifecycle.LifecycleOwner) {
