@@ -9,6 +9,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -27,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
@@ -115,8 +118,14 @@ fun CoverPreview(
                 .semantics { liveRegion = LiveRegionMode.Polite; contentDescription = "Previewing ${track.title} by ${track.artist}" },
         ) {
             val video = track.source == SourceType.YOUTUBE
-            Box(Modifier.fillMaxWidth().aspectRatio(if (video) 16f / 9f else 1f).clip(RoundedCornerShape(Radius.l)).background(Color.Black)) {
-                if (video) YouTubePreview(track.playbackRef) else {
+            val cropArt = org.koin.compose.koinInject<com.arnav.music.core.settings.SettingsRepository>().settings.collectAsState().value.cropArtTracks
+            // Cover-art uploads show square, like Now Playing: the player stays visible, only the empty bars fall outside.
+            val squareArt = video && cropArt && track.variant == com.arnav.music.domain.model.MediaVariant.SONG
+            BoxWithConstraints(
+                Modifier.fillMaxWidth().aspectRatio(if (video && !squareArt) 16f / 9f else 1f).clip(RoundedCornerShape(Radius.l)).background(Color.Black),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (video) YouTubePreview(track.playbackRef, if (squareArt) Modifier.requiredSize(maxHeight * (16f / 9f), maxHeight) else Modifier.fillMaxSize()) else {
                     Artwork(track.artworkUrl, track.id.value, Modifier.fillMaxSize(), shape = androidx.compose.ui.graphics.RectangleShape, decodeSize = 800)
                     LocalPreview(track)
                 }
@@ -163,7 +172,7 @@ private fun LocalPreview(track: Track) {
 }
 
 @Composable
-private fun YouTubePreview(videoId: String) {
+private fun YouTubePreview(videoId: String, modifier: Modifier) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val view = remember {
@@ -183,5 +192,5 @@ private fun YouTubePreview(videoId: String) {
             view.release()
         }
     }
-    AndroidView(factory = { view }, modifier = Modifier.fillMaxSize())
+    AndroidView(factory = { view }, modifier = modifier)
 }
