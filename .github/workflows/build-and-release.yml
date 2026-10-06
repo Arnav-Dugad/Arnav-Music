@@ -1,0 +1,119 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [ main, "claude/**" ]
+    paths-ignore: [ "**.md", "docs/**" ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # All optional. Without them the APK runs in local-only mode (no cloud sync / Gemini),
+      # and users can paste their own YouTube Data API key in Settings → Arnav AI & Sources.
+      YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+      GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Provide Firebase config (optional)
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            echo "$GOOGLE_SERVICES_JSON" > app/google-services.json
+            echo "Firebase config provided"
+          else
+            echo "No Firebase config: building local-only edition"
+          fi
+
+      - name: Provide private signing key (optional)
+        env:
+          KEYSTORE_B64: ${{ secrets.ARNAV_KEYSTORE_BASE64 }}
+          ARNAV_KEYSTORE_PASSWORD: ${{ secrets.ARNAV_KEYSTORE_PASSWORD }}
+          ARNAV_KEY_ALIAS: ${{ secrets.ARNAV_KEY_ALIAS }}
+          ARNAV_KEY_PASSWORD: ${{ secrets.ARNAV_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            {
+              echo "ARNAV_KEYSTORE_PATH=$RUNNER_TEMP/release.jks"
+              echo "ARNAV_KEYSTORE_PASSWORD=$ARNAV_KEYSTORE_PASSWORD"
+              echo "ARNAV_KEY_ALIAS=$ARNAV_KEY_ALIAS"
+              echo "ARNAV_KEY_PASSWORD=$ARNAV_KEY_PASSWORD"
+            } >> "$GITHUB_ENV"
+          fi
+
+      - name: Unit tests
+        run: ./gradlew --stacktrace :core:domain:test :app:testDebugUnitTest
+
+      - name: Assemble release APK (R8)
+        run: ./gradlew --stacktrace :app:assembleRelease
+
+      - name: Lint
+        run: ./gradlew :app:lintRelease
+        continue-on-error: true
+
+      - name: Collect APK
+        id: apk
+        run: |
+          VERSION="1.0.${GITHUB_RUN_NUMBER}"
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk "dist/ArnavMusic-${VERSION}.apk"
+          (cd dist && sha256sum *.apk > SHA256SUMS.txt)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ArnavMusic-${{ steps.apk.outputs.version }}
+          path: dist/
+          if-no-files-found: error
+
+      - name: Upload test & lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ github.run_number }}
+          path: |
+            **/build/reports/
+            **/build/test-results/
+          if-no-files-found: ignore
+
+      - name: Publish GitHub Release
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.apk.outputs.version }}
+          name: Arnav Music ${{ steps.apk.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          generate_release_notes: true
+          body: |
+            **Arnav Music ${{ steps.apk.outputs.version }}** — built from `${{ github.ref_name }}` @ `${{ github.sha }}`.
+
+            ### Install
+            1. Download `ArnavMusic-${{ steps.apk.outputs.version }}.apk` below.
+            2. Open it on your Android phone (Android 8.0+) and allow "Install unknown apps" for your browser if asked.
+            3. Updates install over the previous build (same signing key).
+
+            Builds from this repository are signed with the public community key unless a private key is configured. Verify with `SHA256SUMS.txt`.
+          files: |
+            dist/*.apk
+            dist/SHA256SUMS.txt

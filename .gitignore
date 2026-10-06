@@ -1,0 +1,18 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build
+**/build/
+/captures
+.externalNativeBuild
+.cxx
+.kotlin/
+# Credentials never belong in git
+google-services.json
+*.keystore
+!keystore/arnav-public.jks
+secrets.properties
+.env
+service-account*.json
