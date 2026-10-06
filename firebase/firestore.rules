@@ -1,0 +1,77 @@
+rules_version = '2';
+
+// Arnav Music — Firestore security rules.
+// Every document lives under users/{uid}; only that signed-in user can touch it.
+// Writes are shape- and size-validated server-side; the client is never trusted.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+    function onlyKeys(allowed) { return request.resource.data.keys().hasOnly(allowed); }
+    function str(v, max) { return v is string && v.size() <= max; }
+    function optStr(field, max) {
+      return !(field in request.resource.data) || request.resource.data[field] == null || str(request.resource.data[field], max);
+    }
+    function ts(v) { return v is int && v >= 0 && v <= request.time.toMillis() + 86400000; }
+
+    function validTrack(t) {
+      return t is map
+        && t.keys().hasOnly(['id', 'title', 'artist', 'album', 'durationMs', 'artworkUrl', 'playbackRef', 'channelId', 'genres'])
+        && str(t.id, 64) && str(t.title, 200) && str(t.artist, 200) && str(t.playbackRef, 200)
+        && (!('album' in t) || t.album == null || str(t.album, 200))
+        && (!('artworkUrl' in t) || t.artworkUrl == null || str(t.artworkUrl, 500))
+        && (!('channelId' in t) || t.channelId == null || str(t.channelId, 64))
+        && (!('genres' in t) || t.genres == null || str(t.genres, 200))
+        && (!('durationMs' in t) || t.durationMs == null || (t.durationMs is int && t.durationMs >= 0 && t.durationMs < 86400000));
+    }
+
+    match /users/{uid} {
+      allow read, delete: if isOwner(uid);
+      allow create, update: if isOwner(uid)
+        && onlyKeys(['displayName', 'settings', 'updatedAt', 'schema'])
+        && optStr('displayName', 80)
+        && optStr('settings', 8000)
+        && ts(request.resource.data.updatedAt)
+        && request.resource.data.schema is int;
+
+      match /likes/{trackId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && trackId.size() <= 64
+          && onlyKeys(['trackId', 'likedAt', 'updatedAt', 'deleted', 'track'])
+          && request.resource.data.trackId == trackId
+          && ts(request.resource.data.likedAt)
+          && ts(request.resource.data.updatedAt)
+          && request.resource.data.deleted is bool
+          && (request.resource.data.track == null || validTrack(request.resource.data.track));
+      }
+
+      match /playlists/{playlistId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid)
+          && playlistId.size() <= 64
+          && onlyKeys(['name', 'description', 'kind', 'artworkUrl', 'pinned', 'createdAt', 'updatedAt', 'deleted', 'tracks'])
+          && str(request.resource.data.name, 100)
+          && str(request.resource.data.description, 500)
+          && request.resource.data.kind == 'ARNAV'
+          && optStr('artworkUrl', 500)
+          && request.resource.data.pinned is bool
+          && ts(request.resource.data.createdAt)
+          && ts(request.resource.data.updatedAt)
+          && request.resource.data.deleted is bool
+          && request.resource.data.tracks is list
+          && request.resource.data.tracks.size() <= 500;
+      }
+
+      // Anything not explicitly modelled is denied.
+      match /{rest=**} {
+        allow read, write: if false;
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

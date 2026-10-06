@@ -49,6 +49,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
+import kotlinx.coroutines.launch
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -108,8 +110,8 @@ fun HeartButton(liked: Boolean, onToggle: () -> Unit, modifier: Modifier = Modif
         burst.snapTo(0f)
         pop.snapTo(0.6f)
         kotlinx.coroutines.coroutineScope {
-            kotlinx.coroutines.launch { pop.animateTo(1f, spring(dampingRatio = 0.35f, stiffness = 500f)) }
-            kotlinx.coroutines.launch { burst.animateTo(1f, androidx.compose.animation.core.tween(480)) }
+            launch { pop.animateTo(1f, spring(dampingRatio = 0.35f, stiffness = 500f)) }
+            launch { burst.animateTo(1f, androidx.compose.animation.core.tween(480)) }
         }
     }
     val interaction = rememberInteraction()
@@ -190,7 +192,7 @@ fun SectionHeader(title: String, modifier: Modifier = Modifier, subtitle: String
     Row(modifier.fillMaxWidth().padding(horizontal = Space.gutter), verticalAlignment = Alignment.Bottom) {
         Column(Modifier.weight(1f)) {
             Text(title, style = ArnavTheme.type.title, color = ArnavTheme.colors.content, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.semantics { androidx.compose.ui.semantics.heading() })
+                modifier = Modifier.semantics { heading() })
             if (subtitle != null) Text(subtitle, style = ArnavTheme.type.bodySmall, color = ArnavTheme.colors.contentSubtle, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (action != null && onAction != null) {

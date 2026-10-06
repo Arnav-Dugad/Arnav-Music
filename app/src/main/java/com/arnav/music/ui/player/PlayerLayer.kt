@@ -18,6 +18,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -221,7 +222,7 @@ fun PlayerLayer(
                         translationY = sheetShift
                         alpha = (e * 1.6f).coerceAtMost(1f)
                     }
-                    .clip(RoundedCornerShape(topStart = (1 - e) * 28.dp, topEnd = (1 - e) * 28.dp))
+                    .clip(RoundedCornerShape(topStart = 28.dp * (1 - e), topEnd = 28.dp * (1 - e)))
                     .pointerInput(Unit) {
                         val tracker = VelocityTracker()
                         detectVerticalDragGestures(
@@ -587,7 +588,7 @@ private fun SeekBar(progress: Progress, canSeek: Boolean, accent: Color, on: Col
                             onDragCancel = { dragging = null },
                         ) { change, _ -> dragging = (change.position.x / size.width).coerceIn(0f, 1f) }
                     }.pointerInput(progress.durationMs) {
-                        androidx.compose.foundation.gestures.detectTapGestures { o -> onSeek(((o.x / size.width).coerceIn(0f, 1f) * progress.durationMs).toLong()) }
+                        detectTapGestures { o -> onSeek(((o.x / size.width).coerceIn(0f, 1f) * progress.durationMs).toLong()) }
                     } else Modifier,
                 ),
             contentAlignment = Alignment.CenterStart,

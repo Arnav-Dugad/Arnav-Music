@@ -194,7 +194,7 @@ private fun CollectionScaffold(
         // Dynamic hero background tinted by the collection's artwork.
         Box(
             Modifier.fillMaxWidth().height(420.dp)
-                .graphicsLayer { translationY = -(listState.firstVisibleItemScrollOffset.toFloat() * 0.4f).takeIf { listState.firstVisibleItemIndex == 0 } ?: -420f }
+                .graphicsLayer { translationY = if (listState.firstVisibleItemIndex == 0) -listState.firstVisibleItemScrollOffset * 0.4f else -420.dp.toPx() }
                 .background(Brush.verticalGradient(listOf(Color(palette.backdrop), c.background))),
         )
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = chrome.calculateBottomPadding() + Space.xl)) {

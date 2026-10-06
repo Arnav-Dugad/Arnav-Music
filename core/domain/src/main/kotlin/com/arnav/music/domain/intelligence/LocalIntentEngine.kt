@@ -148,8 +148,11 @@ object LocalIntentEngine {
     }
 
     internal fun parseDuration(text: String): Int {
-        wordDuration.entries.firstOrNull { text.contains(it.key) }?.let { return it.value }
-        val m = durationRegex.find(text) ?: return 45
+        // Explicit numbers win ("1.5 hours"); then the longest matching phrase ("hour and a half" before "an hour").
+        val m = durationRegex.find(text) ?: run {
+            wordDuration.entries.sortedByDescending { it.key.length }.firstOrNull { text.contains(it.key) }?.let { return it.value }
+            return 45
+        }
         val value = m.groupValues[1].toFloatOrNull() ?: return 45
         val unit = m.groupValues[2]
         val minutes = if (unit.startsWith("h")) value * 60 else value
