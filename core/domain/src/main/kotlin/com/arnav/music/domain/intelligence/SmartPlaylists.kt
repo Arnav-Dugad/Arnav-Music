@@ -7,6 +7,7 @@ import java.time.Instant
 import java.time.ZoneId
 
 enum class SmartPlaylist(val title: String, val blurb: String) {
+    TOP_THIS_MONTH("Top songs this month", "Most listened since the 1st, refreshed as you play"),
     HEAVY_ROTATION("Heavy Rotation", "What you keep coming back to this month"),
     FORGOTTEN_FAVORITES("Forgotten Favorites", "Loved once, quiet lately"),
     RECENTLY_DISCOVERED("Recently Discovered", "First heard in the last two weeks"),
@@ -40,6 +41,8 @@ object SmartPlaylistEngine {
         fun dow(e: PlayEvent) = Instant.ofEpochMilli(e.startedAt).atZone(zone).dayOfWeek
 
         val result: List<TrackId> = when (kind) {
+            SmartPlaylist.TOP_THIS_MONTH -> topThisMonth(events, now, zone)
+
             SmartPlaylist.HEAVY_ROTATION -> events.filter { now - it.startedAt < 30 * DAY && !it.skipped }
                 .groupingBy { it.trackId }.eachCount().filterValues { it >= 2 }
                 .entries.sortedByDescending { it.value }.map { it.key }
@@ -70,5 +73,24 @@ object SmartPlaylistEngine {
                 .entries.sortedBy { it.value }.map { it.key }
         }
         return result.distinct().take(limit)
+    }
+
+    /**
+     * Songs of the current calendar month (in [zone], from the 1st at 00:00 up to [now]) ranked by
+     * total listening time, ties broken by number of plays, then id. Only plays of at least
+     * [Milestones.MIN_LISTEN_MS] count, and a song needs [minPlays] of them.
+     */
+    fun topThisMonth(events: List<PlayEvent>, now: Long, zone: ZoneId, minPlays: Int = 2): List<TrackId> {
+        val monthStart = Instant.ofEpochMilli(now).atZone(zone).toLocalDate().withDayOfMonth(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val listened = HashMap<TrackId, Long>()
+        val plays = HashMap<TrackId, Int>()
+        for (e in events) {
+            if (e.startedAt < monthStart || e.startedAt > now || e.listenedMs < Milestones.MIN_LISTEN_MS) continue
+            listened.merge(e.trackId, e.listenedMs, Long::plus)
+            plays.merge(e.trackId, 1, Int::plus)
+        }
+        return plays.filterValues { it >= minPlays }.keys.sortedWith(
+            compareByDescending<TrackId> { listened[it] ?: 0L }.thenByDescending { plays[it] ?: 0 }.thenBy { it.value },
+        )
     }
 }

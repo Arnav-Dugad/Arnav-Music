@@ -973,6 +973,8 @@ private fun Transport(
             if (pill > 0.01f) Box(Modifier.size(40.dp, 30.dp).graphicsLayer { alpha = pill; scaleX = 0.7f + 0.3f * pill; scaleY = 0.7f + 0.3f * pill }.clip(CircleShape).background(on.copy(alpha = 0.14f)))
             ArnavIconButton(Icons.Rounded.Lyrics, if (lyricsOpen) "Hide lyrics" else "Lyrics", onLyrics, tint = if (lyricsOpen) on else muted, size = 20.dp)
         }
+        // Sing: lowers the vocals of songs on this phone (on-device DSP).
+        if (track.source == SourceType.LOCAL) com.arnav.music.ui.lyrics.SingButton(enabled = true, tint = muted, accent = accent)
         ArnavIconButton(Icons.Rounded.Bedtime, if (state.sleep != null) "Sleep timer on" else "Sleep timer", actions.onSleep, tint = if (state.sleep != null) accent else muted, size = 20.dp)
         ArnavIconButton(Icons.AutoMirrored.Rounded.QueueMusic, "Queue", onQueue, tint = muted, size = 20.dp)
     }

@@ -8,6 +8,7 @@ import com.arnav.music.core.common.Clock
 import com.arnav.music.core.db.PendingMatchEntity
 import com.arnav.music.core.importer.ImportMatcher
 import com.arnav.music.core.importer.MatchNowResult
+import com.arnav.music.core.lyrics.LyricsRepository
 import com.arnav.music.core.repo.IntelligenceRepository
 import com.arnav.music.core.repo.LibraryRepository
 import com.arnav.music.core.system.Shortcuts
@@ -22,6 +23,7 @@ import com.arnav.music.domain.provider.MusicError
 import com.arnav.music.domain.provider.SearchFilter
 import com.arnav.music.feature.library.describeYouTubeError
 import com.arnav.music.ui.CollectionKind
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,6 +32,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 
 enum class SmartSort(val label: String) { DEFAULT("Default"), ENERGY_UP("Energy rising"), VARIETY("Artist variety"), TITLE("A–Z") }
 
@@ -52,6 +56,19 @@ data class CollectionUi(
     val youtubeImport: Boolean = false,
 )
 
+/** "Download lyrics" for every song in a collection (see [CollectionViewModel.downloadLyricsPack]). */
+data class LyricsPackUi(
+    val running: Boolean,
+    val done: Int,
+    val total: Int,
+    /** Songs that have lyrics saved on the device. */
+    val found: Int,
+    /** Final summary, e.g. "Saved lyrics for 37 of 52 songs"; null while running. */
+    val message: String? = null,
+) {
+    val fraction: Float get() = if (total == 0) 0f else done.toFloat() / total
+}
+
 class CollectionViewModel(
     private val library: LibraryRepository,
     private val intelligence: IntelligenceRepository,
@@ -59,7 +76,7 @@ class CollectionViewModel(
     private val clock: Clock,
     private val matcher: ImportMatcher,
     private val youtubeImporter: YouTubeImporter,
-) : ViewModel() {
+) : ViewModel(), KoinComponent {
     private val _ui = MutableStateFlow(CollectionUi())
     val ui: StateFlow<CollectionUi> = _ui.asStateFlow()
     val filter = MutableStateFlow("")
@@ -250,6 +267,63 @@ class CollectionViewModel(
             _refreshing.value = false
         }
     }
+
+    // ---- Lyrics pack (offline lyrics for every song here) ----
+
+    // Resolved lazily from Koin so the constructor (and its Koin definition) stay unchanged.
+    private val lyricsRepo: LyricsRepository by inject()
+    private val _lyricsPack = MutableStateFlow<LyricsPackUi?>(null)
+    /** Null until the user starts a pack; then progress, then the final summary. */
+    val lyricsPack: StateFlow<LyricsPackUi?> = _lyricsPack.asStateFlow()
+    private var packJob: Job? = null
+
+    /**
+     * Saves lyrics for every song in this collection that has none yet (song file first, then
+     * LRCLIB at ~4 requests/s when "Online lyrics" is on), so they're there offline.
+     */
+    fun downloadLyricsPack() {
+        if (packJob?.isActive == true) return
+        val tracks = _ui.value.tracks
+        if (tracks.isEmpty()) return
+        packJob = viewModelScope.launch {
+            _lyricsPack.value = LyricsPackUi(running = true, done = 0, total = tracks.size, found = 0)
+            val result = try {
+                lyricsRepo.fetchPack(tracks) { done, total, found ->
+                    _lyricsPack.value = LyricsPackUi(running = true, done = done, total = total, found = found)
+                }
+            } catch (e: CancellationException) {
+                _lyricsPack.update { p -> p?.let { it.copy(running = false, message = "Stopped · " + savedText(it.found, it.total)) } }
+                throw e
+            } catch (e: Exception) {
+                _lyricsPack.update { p -> p?.copy(running = false, message = "Couldn't download lyrics right now.") }
+                return@launch
+            }
+            val extra = when {
+                !result.onlineUsed && result.found < result.total -> " · Turn on Online lyrics in Settings to look up the rest."
+                result.offline -> " · You seem to be offline; try again later for the rest."
+                else -> ""
+            }
+            _lyricsPack.value = LyricsPackUi(
+                running = false,
+                done = result.total,
+                total = result.total,
+                found = result.found,
+                message = savedText(result.found, result.total) + extra,
+            )
+        }
+    }
+
+    fun cancelLyricsPack() {
+        packJob?.cancel()
+    }
+
+    /** Hides the summary. */
+    fun dismissLyricsPack() {
+        if (packJob?.isActive != true) _lyricsPack.value = null
+    }
+
+    private fun savedText(found: Int, total: Int): String =
+        "Saved lyrics for $found of $total ${if (total == 1) "song" else "songs"}"
 
     // ---- Artist ----
     private val _artist = MutableStateFlow(CollectionUi())

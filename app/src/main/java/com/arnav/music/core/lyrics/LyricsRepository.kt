@@ -7,10 +7,14 @@ import com.arnav.music.core.db.LyricsEntity
 import com.arnav.music.domain.lyrics.EmbeddedLyrics
 import com.arnav.music.domain.lyrics.LrcParser
 import com.arnav.music.domain.lyrics.Lyrics
+import com.arnav.music.domain.lyrics.RatePacer
 import com.arnav.music.domain.model.SourceType
 import com.arnav.music.domain.model.Track
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -23,6 +27,19 @@ import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.util.concurrent.ConcurrentHashMap
+
+/** Outcome of [LyricsRepository.fetchPack]. */
+data class LyricsPackResult(
+    val total: Int,
+    /** Songs that have lyrics saved on the device now (including ones that already had them). */
+    val found: Int,
+    /** Songs whose lyrics were newly downloaded from LRCLIB. */
+    val fetched: Int,
+    /** Stopped asking LRCLIB after repeated network failures. */
+    val offline: Boolean,
+    /** Whether online lookups were allowed at all ("Online lyrics" on). */
+    val onlineUsed: Boolean,
+)
 
 sealed interface LyricsState {
     data object Loading : LyricsState
@@ -69,29 +86,89 @@ class LyricsRepository(
      * Looks the song up on LRCLIB unless lyrics are already saved, the user removed them, the setting
      * is off, or LRCLIB recently had nothing (remembered for a week; instrumentals for 90 days).
      */
-    private suspend fun fetchOnlineIfNeeded(track: Track, force: Boolean = false): Boolean {
-        val client = online ?: return false
-        if (!onlineEnabled()) return false
+    private suspend fun fetchOnlineIfNeeded(track: Track, force: Boolean = false): Boolean =
+        lookupOnline(track, force) == Lookup.SAVED
+
+    private enum class Lookup { SAVED, MISSING, SKIPPED, FAILED }
+
+    private suspend fun lookupOnline(track: Track, force: Boolean = false, pace: suspend () -> Unit = {}): Lookup {
+        val client = online ?: return Lookup.SKIPPED
+        if (!onlineEnabled()) return Lookup.SKIPPED
         val id = track.id.value
         val missedAt = misses.getLong(id, 0L)
         val missTtl = if (misses.getBoolean("$id#instrumental", false)) INSTRUMENTAL_TTL_MS else MISS_TTL_MS
-        if (!force && missedAt > 0 && System.currentTimeMillis() - missedAt < missTtl) return false
-        if (!inflight.add(id)) return false
+        if (!force && missedAt > 0 && System.currentTimeMillis() - missedAt < missTtl) return Lookup.MISSING
+        if (!inflight.add(id)) return Lookup.SKIPPED
         return try {
-            if (!force && dao.get(id) != null) return false
-            when (val found = client.find(track)) {
-                is OnlineLyrics.Found -> save(track, found.text, SOURCE_LRCLIB)
-                OnlineLyrics.Instrumental -> { misses.edit().putLong(id, System.currentTimeMillis()).putBoolean("$id#instrumental", true).apply(); false }
-                OnlineLyrics.NotFound -> { misses.edit().putLong(id, System.currentTimeMillis()).apply(); false }
+            if (!force && dao.get(id) != null) return Lookup.SKIPPED
+            when (val found = client.find(track, pace)) {
+                is OnlineLyrics.Found -> if (save(track, found.text, SOURCE_LRCLIB)) Lookup.SAVED else Lookup.MISSING
+                OnlineLyrics.Instrumental -> { misses.edit().putLong(id, System.currentTimeMillis()).putBoolean("$id#instrumental", true).apply(); Lookup.MISSING }
+                OnlineLyrics.NotFound -> { misses.edit().putLong(id, System.currentTimeMillis()).apply(); Lookup.MISSING }
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             // Offline or LRCLIB unreachable: try again next time, nothing remembered.
-            false
+            Lookup.FAILED
         } finally {
             inflight.remove(id)
         }
+    }
+
+    /**
+     * "Download lyrics" for a whole playlist/album: saves lyrics for every song in [tracks] that has
+     * none yet — from the song file first (on-device songs), then LRCLIB — so they work offline.
+     *
+     * Songs with saved lyrics count as found; songs whose lyrics the user removed, and songs LRCLIB
+     * recently had nothing for, are skipped. LRCLIB is asked at most ~4 times a second, nothing is
+     * looked up online when "Online lyrics" is off, and the pack stops after a few network failures
+     * in a row (offline). Cancelling the calling coroutine stops it after the current song.
+     *
+     * [onProgress] is called with (songs done, total, songs that now have lyrics), first with
+     * (0, total, 0) and after every song.
+     */
+    suspend fun fetchPack(
+        tracks: List<Track>,
+        onProgress: (done: Int, total: Int, found: Int) -> Unit,
+    ): LyricsPackResult {
+        val unique = tracks.distinctBy { it.id }
+        val total = unique.size
+        var done = 0
+        var found = 0
+        var fetched = 0
+        var failuresInRow = 0
+        var offline = false
+        val pacer = RatePacer(PACK_REQUEST_INTERVAL_MS)
+        val pace: suspend () -> Unit = {
+            val wait = synchronized(pacer) { pacer.acquire(System.currentTimeMillis()) }
+            if (wait > 0) delay(wait)
+        }
+        onProgress(0, total, 0)
+        for (track in unique) {
+            currentCoroutineContext().ensureActive()
+            val id = track.id.value
+            val saved = try { dao.get(id) } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
+            val has = when {
+                saved != null -> saved.source != SOURCE_REMOVED && saved.text.isNotBlank()
+                track.source == SourceType.LOCAL && scanned.add(id) && scanEmbedded(track) -> true
+                offline -> false
+                else -> when (lookupOnline(track, pace = pace)) {
+                    Lookup.SAVED -> { fetched++; failuresInRow = 0; true }
+                    Lookup.FAILED -> {
+                        failuresInRow++
+                        if (failuresInRow >= PACK_MAX_FAILURES_IN_ROW) offline = true
+                        false
+                    }
+                    Lookup.MISSING -> { failuresInRow = 0; false }
+                    Lookup.SKIPPED -> false
+                }
+            }
+            if (has) found++
+            done++
+            onProgress(done, total, found)
+        }
+        return LyricsPackResult(total = total, found = found, fetched = fetched, offline = offline, onlineUsed = onlineAvailable)
     }
 
     /** "Search online again": clears a removal or a remembered miss and asks LRCLIB now. */
@@ -233,6 +310,9 @@ class LyricsRepository(
         const val SOURCE_PASTED = "pasted"
         /** Fetched from LRCLIB (community lyrics) and saved on the device. */
         const val SOURCE_LRCLIB = "lrclib"
+        /** ~4 LRCLIB requests a second at most while downloading a lyrics pack. */
+        private const val PACK_REQUEST_INTERVAL_MS = 250L
+        private const val PACK_MAX_FAILURES_IN_ROW = 3
         private const val MISS_TTL_MS = 7L * 24 * 60 * 60 * 1000
         private const val INSTRUMENTAL_TTL_MS = 90L * 24 * 60 * 60 * 1000
         /** Marker row: the user removed lyrics for a local file. Rendered as no lyrics. */

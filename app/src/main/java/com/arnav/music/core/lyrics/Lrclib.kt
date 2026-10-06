@@ -45,7 +45,11 @@ class LrclibClient(
     private val client = baseClient.newBuilder().callTimeout(10, java.util.concurrent.TimeUnit.SECONDS).build()
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; coerceInputValues = true }
 
-    suspend fun find(track: Track): OnlineLyrics = withContext(Dispatchers.IO) {
+    /**
+     * Looks [track] up. [pace] runs before every HTTP request (the lyrics pack uses it to stay at
+     * about four requests a second); a lookup makes one or two requests.
+     */
+    suspend fun find(track: Track, pace: suspend () -> Unit = {}): OnlineLyrics = withContext(Dispatchers.IO) {
         val title = cleanTitle(track.title)
         val artist = track.artist.substringBefore(',').substringBefore(" & ").substringBefore(" x ").trim()
         if (title.isBlank() || artist.isBlank()) return@withContext OnlineLyrics.NotFound
@@ -59,6 +63,7 @@ class LrclibClient(
                 .apply { track.album?.takeIf { it.isNotBlank() }?.let { addQueryParameter("album_name", it) } }
                 .addQueryParameter("duration", durationSec.toLong().toString())
                 .build()
+            pace()
             getOne(url.toString())?.let { rec -> toResult(rec)?.let { return@withContext it } }
         }
 
@@ -67,6 +72,7 @@ class LrclibClient(
             .addQueryParameter("track_name", title)
             .addQueryParameter("artist_name", artist)
             .build()
+        pace()
         val candidates = getList(search.toString())
         val best = candidates
             .filter { (it.syncedLyrics ?: it.plainLyrics).isNullOrBlank().not() || it.instrumental }

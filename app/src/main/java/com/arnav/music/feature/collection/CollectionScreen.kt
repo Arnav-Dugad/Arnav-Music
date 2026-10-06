@@ -1,5 +1,6 @@
 package com.arnav.music.feature.collection
 
+import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -123,11 +124,35 @@ fun CollectionScreen(kind: CollectionKind, id: String, vm: CollectionViewModel =
     // Recently opened playlists become launcher shortcuts; any playlist can be pinned to the home screen.
     val context = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(ui.loading, ui.title) { if (!ui.loading) vm.rememberOpened(context) }
+    val pack by vm.lyricsPack.collectAsStateWithLifecycle()
     CollectionScaffold(
         sharedKey = ArtKeys.collection(kind, id),
+        heroExtra = {
+            pack?.let { p ->
+                Spacer(Modifier.height(Space.m))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    if (p.running) {
+                        androidx.compose.material3.LinearProgressIndicator(
+                            progress = { p.fraction }, modifier = Modifier.weight(1f).clip(RoundedCornerShape(2.dp)), color = c.accent, trackColor = c.outline,
+                        )
+                        Text("  Lyrics ${p.done}/${p.total} · ${p.found} saved", style = ArnavTheme.type.caption, color = c.contentMuted)
+                        Text("Stop", style = ArnavTheme.type.label, color = c.accent,
+                            modifier = Modifier.clip(RoundedCornerShape(Radius.s)).clickable(onClick = vm::cancelLyricsPack).padding(Space.s))
+                    } else p.message?.let { msg ->
+                        Text(msg, style = ArnavTheme.type.caption, color = c.contentMuted, modifier = Modifier.weight(1f))
+                        Text("OK", style = ArnavTheme.type.label, color = c.accent,
+                            modifier = Modifier.clip(RoundedCornerShape(Radius.s)).clickable(onClick = vm::dismissLyricsPack).padding(Space.s))
+                    }
+                }
+            }
+        },
         title = ui.title, subtitle = ui.subtitle, kindLabel = ui.kindLabel, description = ui.description, tracks = visible, allTracks = ui.tracks,
         loading = ui.loading, youtube = ui.youtube,
         actions = {
+            // Save lyrics for every song in this list, ready offline.
+            if (ui.tracks.isNotEmpty() && pack?.running != true) {
+                ArnavIconButton(Icons.Rounded.Lyrics, "Download lyrics for this list", vm::downloadLyricsPack, tint = c.contentMuted)
+            }
             if (vm.canPinShortcut && com.arnav.music.core.system.Shortcuts.canPin(context)) {
                 ArnavIconButton(Icons.Rounded.AddToHomeScreen, "Add to home screen", { vm.pinShortcut(context) { msg -> msg?.let { app.message(it) } } }, tint = c.contentMuted)
             }
@@ -232,6 +257,8 @@ private fun CollectionScaffold(
     pending: List<PendingMatchEntity> = emptyList(), matchingIds: Set<Long> = emptySet(),
     onPendingTap: ((PendingMatchEntity) -> Unit)? = null, onPendingRemove: ((PendingMatchEntity) -> Unit)? = null,
     sharedKey: String? = null,
+    /** Extra content under the Play/Shuffle buttons (e.g. lyrics download progress). */
+    heroExtra: @Composable () -> Unit = {},
 ) {
     val app = LocalAppViewModel.current
     val nav = LocalNavigator.current
@@ -310,6 +337,7 @@ private fun CollectionScaffold(
                         PrimaryButton("Play", { playFromHero(false) }, enabled = tracks.isNotEmpty(), icon = Icons.Rounded.PlayArrow)
                         SecondaryButton("Shuffle", { playFromHero(true) }, icon = Icons.Rounded.Shuffle, enabled = tracks.size > 1)
                     }
+                    heroExtra()
                 }
             }
             if (onFilter != null && allTracks.size > 8) item(key = "filter") {

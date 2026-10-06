@@ -1,5 +1,6 @@
 package com.arnav.music.ui.lyrics
 
+import com.arnav.music.core.analysis.rememberBeatPulse
 import com.arnav.music.core.analysis.rememberLoudness
 import android.net.Uri
 import android.os.Build
@@ -52,12 +53,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.SortByAlpha
+import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -114,7 +118,9 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.arnav.music.core.lyrics.LyricsRepository
 import com.arnav.music.core.lyrics.LyricsState
+import com.arnav.music.core.lyrics.Romanizer
 import com.arnav.music.core.playback.Progress
+import com.arnav.music.core.settings.SettingsRepository
 import com.arnav.music.domain.lyrics.LyricLine
 import com.arnav.music.domain.lyrics.LyricWord
 import com.arnav.music.domain.lyrics.Lyrics
@@ -153,8 +159,18 @@ fun LyricsPanel(
     contentPadding: PaddingValues = PaddingValues(),
 ) {
     // On-device songs with analysis: the sung line swells very slightly with the song's loudness.
-    val level = rememberLoudness(track.id.value.takeIf { track.source == SourceType.LOCAL }, progress, isPlaying)
-    LyricsHost(track, live = true, progress, isPlaying, onSeek, on, muted, accent, modifier, contentPadding, loudness = { level.value })
+    val localId = track.id.value.takeIf { track.source == SourceType.LOCAL }
+    val level = rememberLoudness(localId, progress, isPlaying)
+    // ...and bounces a touch on the beat (analysed on-device songs only; never for YouTube, whose
+    // audio the app can't analyse). rememberBeatPulse is 0 under reduced motion.
+    val settingsRepo = koinInject<SettingsRepository>()
+    val appSettings by settingsRepo.settings.collectAsState()
+    val beat = rememberBeatPulse(localId, progress, isPlaying, enabled = appSettings.beatVisuals)
+    LyricsHost(
+        track, live = true, progress, isPlaying, onSeek, on, muted, accent, modifier, contentPadding,
+        loudness = { level.value },
+        beat = { beat.value },
+    )
 }
 
 /** All lyric lines at full opacity, without following playback (e.g. for a song that isn't playing). */
@@ -187,12 +203,33 @@ private fun LyricsHost(
     modifier: Modifier,
     contentPadding: PaddingValues,
     loudness: () -> Float = { 0f },
+    beat: () -> Float = { 0f },
 ) {
     val repo = koinInject<LyricsRepository>()
     val flow = remember(track.id) { repo.observe(track) }
     val state by flow.collectAsState(initial = LyricsState.Loading)
     val scope = rememberCoroutineScope()
     val haptics = ArnavTheme.haptics
+
+    // Romanisation / translation under each line (settings in the "•••" menu).
+    val settingsRepo = koinInject<SettingsRepository>()
+    val appSettings by settingsRepo.settings.collectAsState()
+    val ready = state as? LyricsState.Ready
+    val extrasLines = remember(ready?.lyrics) { ready?.lyrics?.displayLines().orEmpty() }
+    val extras = rememberLyricsExtras(
+        track = track,
+        lines = extrasLines,
+        translate = appSettings.lyricsTranslation,
+        romanize = appSettings.lyricsRomanization && Romanizer.supported,
+    )
+    val toggleTranslation: () -> Unit = {
+        if (!appSettings.lyricsTranslation) LyricsExtrasState.allowDownloads()
+        scope.launch { settingsRepo.update { it.copy(lyricsTranslation = !it.lyricsTranslation) } }
+    }
+    val toggleRomanization: () -> Unit = {
+        scope.launch { settingsRepo.update { it.copy(lyricsRomanization = !it.lyricsRomanization) } }
+    }
+    val header: @Composable () -> Unit = { TranslationStatus(extras, on, muted) }
 
     var editorText by remember(track.id) { mutableStateOf<String?>(null) }
     var editorError by remember(track.id) { mutableStateOf<String?>(null) }
@@ -273,6 +310,10 @@ private fun LyricsHost(
                             onEdit = { openEditor(s.raw) },
                             onImport = openPicker,
                             onRemove = remove,
+                            translation = appSettings.lyricsTranslation,
+                            onToggleTranslation = toggleTranslation,
+                            romanization = if (Romanizer.supported) appSettings.lyricsRomanization else null,
+                            onToggleRomanization = toggleRomanization,
                         )
                     }
                     val lyrics = s.lyrics
@@ -288,6 +329,9 @@ private fun LyricsHost(
                             contentPadding = contentPadding,
                             menu = menu,
                             loudness = loudness,
+                            beat = beat,
+                            extras = extras,
+                            header = header,
                         )
                     } else {
                         val caption = when {
@@ -302,6 +346,8 @@ private fun LyricsHost(
                             muted = muted,
                             contentPadding = contentPadding,
                             menu = menu,
+                            extras = extras,
+                            header = header,
                         )
                     }
                 }
@@ -463,6 +509,9 @@ private fun SyncedLyrics(
     contentPadding: PaddingValues,
     menu: @Composable () -> Unit,
     loudness: () -> Float = { 0f },
+    beat: () -> Float = { 0f },
+    extras: LyricsExtrasState? = null,
+    header: @Composable () -> Unit = {},
 ) {
     val motion = ArnavTheme.motion
     val haptics = ArnavTheme.haptics
@@ -474,6 +523,12 @@ private fun SyncedLyrics(
         lineHeight = 34.5.sp,
         fontWeight = FontWeight.ExtraBold,
         letterSpacing = (-0.02).em,
+    )
+    val secondaryStyle = ArnavTheme.type.headline.copy(
+        fontSize = 17.sp,
+        lineHeight = 22.sp,
+        fontWeight = FontWeight.SemiBold,
+        letterSpacing = (-0.01).em,
     )
     val followSpec = motion.responsive<Float>()
 
@@ -592,11 +647,15 @@ private fun SyncedLyrics(
                         style = lineStyle,
                         onTap = onTap,
                         loudness = loudness,
+                        beat = beat,
+                        extras = extras?.forLine(line.text),
+                        secondaryStyle = secondaryStyle,
                     )
                 }
             }
         }
 
+        Box(Modifier.align(Alignment.TopStart).padding(top = padTop + 6.dp, start = start + 22.dp, end = end + 52.dp)) { header() }
         Box(Modifier.align(Alignment.TopEnd).padding(top = padTop, end = end + 4.dp)) { menu() }
     }
 }
@@ -616,6 +675,9 @@ private fun LyricRow(
     style: TextStyle,
     onTap: () -> Unit,
     loudness: () -> Float = { 0f },
+    beat: () -> Float = { 0f },
+    extras: LineExtras? = null,
+    secondaryStyle: TextStyle = style,
 ) {
     val alphaTarget = when {
         isActive -> 1f
@@ -640,10 +702,14 @@ private fun LyricRow(
         Modifier
             .fillMaxWidth()
             .graphicsLayer {
-                translationY = cascade.offsetFor(index)
+                // Beat bounce: the sung line lifts ≤ 2 dp and ticks up a hair on each beat (eased).
+                val b = if (isActive && !reduced) beat().coerceIn(0f, 1f) else 0f
+                val bounce = b * b * (3f - 2f * b)
+                translationY = cascade.offsetFor(index) - bounce * BEAT_LIFT_DP.dp.toPx()
                 val swell = if (isActive && !reduced) 1f + 0.035f * loudness().coerceIn(0f, 1f) else 1f
-                scaleX = scale * swell
-                scaleY = scale * swell
+                val tick = 1f + BEAT_SCALE * bounce
+                scaleX = scale * swell * tick
+                scaleY = scale * swell * tick
                 transformOrigin = TransformOrigin(0f, 0.5f)
                 alpha = lineAlpha
                 val radius = blurDp.dp.toPx()
@@ -658,27 +724,50 @@ private fun LyricRow(
                 onClick = onTap,
             )
             .semantics {
-                contentDescription = line.text
+                contentDescription = listOfNotNull(line.text, extras?.translated).joinToString(". ")
                 if (isActive) stateDescription = "Now singing"
                 customActions = listOf(CustomAccessibilityAction("Seek here") { onTap(); true })
             }
             .padding(horizontal = 10.dp, vertical = 12.dp),
     ) {
-        Text(
-            text = line.text,
-            style = style,
-            color = on,
-            modifier = if (wordSync) {
-                Modifier
-                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                    .drawWithContent {
-                        drawContent()
-                        val layout = layoutRef.value
-                        if (layout != null) drawWordMask(layout, ranges, words, line, clock.positionMs)
-                    }
-            } else Modifier,
-            onTextLayout = { layoutRef.value = it },
-        )
+        Column {
+            // Word fill (the mask) is applied to the main line only.
+            Text(
+                text = line.text,
+                style = style,
+                color = on,
+                modifier = if (wordSync) {
+                    Modifier
+                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                        .drawWithContent {
+                            drawContent()
+                            val layout = layoutRef.value
+                            if (layout != null) drawWordMask(layout, ranges, words, line, clock.positionMs)
+                        }
+                } else Modifier,
+                onTextLayout = { layoutRef.value = it },
+            )
+            SecondaryLines(extras, secondaryStyle, on)
+        }
+    }
+}
+
+private const val BEAT_LIFT_DP = 2f
+private const val BEAT_SCALE = 0.012f
+private const val SECONDARY_ALPHA = 0.62f
+
+/** Romanisation, then translation, smaller and muted under a lyric line. */
+@Composable
+private fun SecondaryLines(extras: LineExtras?, style: TextStyle, on: Color) {
+    if (extras == null) return
+    val color = on.copy(alpha = on.alpha * SECONDARY_ALPHA)
+    val romanized = extras.romanized
+    val translated = extras.translated
+    if (romanized != null) {
+        Text(romanized, style = style, color = color, modifier = Modifier.padding(top = 4.dp))
+    }
+    if (translated != null) {
+        Text(translated, style = style, color = color, modifier = Modifier.padding(top = if (romanized != null) 2.dp else 4.dp))
     }
 }
 
@@ -850,10 +939,13 @@ private fun StaticLyrics(
     muted: Color,
     contentPadding: PaddingValues,
     menu: @Composable () -> Unit,
+    extras: LyricsExtrasState? = null,
+    header: @Composable () -> Unit = {},
 ) {
     val layoutDirection = LocalLayoutDirection.current
     val density = LocalDensity.current
     val style = ArnavTheme.type.headline.copy(fontSize = 22.sp, lineHeight = 29.sp, fontWeight = FontWeight.SemiBold)
+    val secondaryStyle = ArnavTheme.type.headline.copy(fontSize = 16.sp, lineHeight = 21.sp, fontWeight = FontWeight.Medium)
     val padTop = contentPadding.calculateTopPadding()
     val padBottom = contentPadding.calculateBottomPadding()
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -880,13 +972,17 @@ private fun StaticLyrics(
                     if (notice != null) {
                         Text(notice, style = ArnavTheme.type.caption, color = on, modifier = Modifier.padding(bottom = 12.dp))
                     }
+                    Box(Modifier.padding(bottom = 8.dp)) { header() }
                 }
             }
             itemsIndexed(lines, key = { i, _ -> i }) { _, text ->
                 if (text.isBlank()) {
                     Spacer(Modifier.height(18.dp))
                 } else {
-                    Text(text, style = style, color = on, modifier = Modifier.padding(vertical = 5.dp))
+                    Column(Modifier.padding(vertical = 5.dp)) {
+                        Text(text, style = style, color = on)
+                        SecondaryLines(extras?.forLine(text), secondaryStyle, on)
+                    }
                 }
             }
         }
@@ -1016,11 +1112,39 @@ private fun PanelButton(text: String, icon: ImageVector, onClick: () -> Unit, fi
 }
 
 @Composable
-private fun LyricsMenu(tint: Color, onEdit: () -> Unit, onImport: () -> Unit, onRemove: () -> Unit) {
+private fun LyricsMenu(
+    tint: Color,
+    onEdit: () -> Unit,
+    onImport: () -> Unit,
+    onRemove: () -> Unit,
+    translation: Boolean? = null,
+    onToggleTranslation: () -> Unit = {},
+    romanization: Boolean? = null,
+    onToggleRomanization: () -> Unit = {},
+) {
     var open by remember { mutableStateOf(false) }
     Box {
         ArnavIconButton(Icons.Rounded.MoreHoriz, "Lyrics options", { open = true }, tint = tint, size = 20.dp)
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            if (translation != null) {
+                DropdownMenuItem(
+                    text = { Text("Show translation") },
+                    onClick = { open = false; onToggleTranslation() },
+                    leadingIcon = { Icon(Icons.Rounded.Translate, null) },
+                    trailingIcon = { if (translation) Icon(Icons.Rounded.Check, "On") },
+                    modifier = Modifier.semantics { stateDescription = if (translation) "On" else "Off" },
+                )
+            }
+            if (romanization != null) {
+                // Hidden below Android 10 (no ICU transliterator there).
+                DropdownMenuItem(
+                    text = { Text("Show romanisation") },
+                    onClick = { open = false; onToggleRomanization() },
+                    leadingIcon = { Icon(Icons.Rounded.SortByAlpha, null) },
+                    trailingIcon = { if (romanization) Icon(Icons.Rounded.Check, "On") },
+                    modifier = Modifier.semantics { stateDescription = if (romanization) "On" else "Off" },
+                )
+            }
             DropdownMenuItem(
                 text = { Text("Edit lyrics") },
                 onClick = { open = false; onEdit() },

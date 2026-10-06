@@ -266,8 +266,10 @@ private fun PlaybackPage(vm: SettingsViewModel) {
             Divider()
             ToggleRow("Lyrics translation", s.lyricsTranslation, { v -> vm.update { it.copy(lyricsTranslation = v) } }, "A translation into your phone's language under each line (on-device; downloads a language model once)")
             Divider()
-            ToggleRow("Lyrics romanisation", s.lyricsRomanization, { v -> vm.update { it.copy(lyricsRomanization = v) } }, "Latin letters under lines written in other scripts (Android 10+)")
-            Divider()
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                ToggleRow("Lyrics romanisation", s.lyricsRomanization, { v -> vm.update { it.copy(lyricsRomanization = v) } }, "Latin letters under lines written in other scripts. Japanese: kana only")
+                Divider()
+            }
             ToggleRow("Endless radio", s.endlessRadio, { v -> vm.update { it.copy(endlessRadio = v) } }, "When the queue ends, keep going with songs picked for you")
             Divider()
             ToggleRow("Online lyrics (LRCLIB)", s.onlineLyrics, { v -> vm.update { it.copy(onlineLyrics = v) } }, "Fetches time-synced lyrics from LRCLIB, an open community database, when a song has none on this device. Saved after the first look-up")

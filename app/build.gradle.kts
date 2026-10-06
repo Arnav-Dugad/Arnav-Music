@@ -186,6 +186,9 @@ dependencies {
     implementation(libs.coil.network.okhttp)
     implementation(libs.okhttp)
     implementation(libs.youtube.player)
+    // On-device lyrics translation (models downloaded on demand) and language detection.
+    implementation(libs.mlkit.language.id)
+    implementation(libs.mlkit.translate)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

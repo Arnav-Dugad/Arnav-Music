@@ -49,6 +49,14 @@ data class Track(
     val credits: String? = null,
     /** Mix, mashup, jukebox or long-form set — excluded from recommendations. */
     val compilation: Boolean = false,
+    /** Position on its disc (on-device albums); null when untagged. */
+    val trackNumber: Int? = null,
+    /** Disc of a multi-disc album; null when untagged (treated as disc 1). */
+    val discNumber: Int? = null,
+    /** Source album id (MediaStore ALBUM_ID for on-device songs). */
+    val albumId: String? = null,
+    /** Album artist tag, when it differs from the per-song artist (compilations, features). */
+    val albumArtist: String? = null,
 ) {
     val source: SourceType get() = id.source
     val artistKey: String get() = ArtistKey.of(artist)
