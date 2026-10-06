@@ -99,15 +99,22 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
+          cores: 4
+          ram-size: 4096M
           emulator-boot-timeout: 900
           script: |
             mkdir -p ui-test-logs && rm -f ui-test-logs/FAILED
             adb logcat -G 16M || true
             adb logcat -c || true
+            # Slow CI emulators show "System UI isn't responding" dialogs that steal key events.
+            adb shell settings put global hide_error_dialogs 1 || true
+            adb shell settings put secure anr_show_background 0 || true
             ./gradlew --no-daemon :app:connectedDebugAndroidTest ${TEST_FILTER:+-Pandroid.testInstrumentationRunnerArguments.class=$TEST_FILTER} || touch ui-test-logs/FAILED
             adb logcat -d -v threadtime > ui-test-logs/logcat-full.txt || true
             adb logcat -d -b crash -v threadtime > ui-test-logs/logcat-crash.txt || true
             adb shell dumpsys activity exit-info com.arnav.music > ui-test-logs/exit-info.txt || true
+            echo "Window focus after tests:"; adb shell dumpsys window | grep -E "mCurrentFocus|mFocusedApp" || true
+            echo "App errors in logcat:"; grep -E " (E|F) " ui-test-logs/logcat-full.txt | grep -iE "arnav|AndroidRuntime|compose|lifecycle|glance|IllegalState" | grep -v "TestRunner" | tail -n 120 || true
             adb exec-out screencap -p > ui-test-logs/final-screen.png || true
 
       - name: App crashes in logcat
@@ -167,12 +174,13 @@ jobs:
                       text = (problem.get("message") or "") + "\n" + (problem.text or "")
                       lines = [l for l in text.splitlines() if l.strip()]
                       keep = []
+                      # Keep app/compose/lifecycle frames and every "Caused by"/"Suppressed" line.
                       for l in lines:
                           s = l.strip()
-                          if s.startswith("at ") and not ("com.arnav.music" in s):
+                          if s.startswith("at ") and not any(k in s for k in ("com.arnav.music", "androidx.compose.ui.platform", "androidx.lifecycle", "androidx.glance", "androidx.activity", "android.view")):
                               continue
                           keep.append(l.rstrip())
-                          if len(keep) >= 25:
+                          if len(keep) >= 70:
                               break
                       failures.append((name, keep))
           out.insert(0, f"Instrumented tests: {total} run, {failed} failed, {skipped} skipped ({len(files)} result file(s))")

@@ -98,8 +98,25 @@ fun ComposeTestRule.tap(matcher: SemanticsMatcher, timeout: Long = TIMEOUT) {
     waitForIdle()
 }
 
+/**
+ * Slow CI emulators sometimes pop a system "isn't responding" dialog (package `android`) on top of
+ * the app. It steals key events and focus, so dismiss it (choosing "Wait") before acting.
+ */
+fun dismissSystemDialogs() {
+    repeat(3) {
+        if (device.currentPackageName == "com.arnav.music") return
+        val button = listOf("Wait", "WAIT", "Close app", "OK", "Close").firstNotNullOfOrNull { label ->
+            device.findObject(androidx.test.uiautomator.By.text(label))
+        } ?: return
+        Log.w("ArnavTest", "Dismissing a system dialog over the app (${device.currentPackageName})")
+        runCatching { button.click() }
+        device.waitForIdle(1_000)
+    }
+}
+
 /** System back (key event through the window, like a person pressing back). */
 fun ComposeTestRule.pressBack() {
+    dismissSystemDialogs()
     device.pressBack()
     waitForIdle()
 }

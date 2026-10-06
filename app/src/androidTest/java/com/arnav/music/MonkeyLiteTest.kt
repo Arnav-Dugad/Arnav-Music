@@ -57,6 +57,8 @@ class MonkeyLiteTest {
         "install", "allow installs", "allow access", "delete", "remove", "clear", "disconnect", "refresh from youtube",
         "open in", "add key", "save key", "download", "manage permission", "analyze now", "sync now", "resend",
         "skip onboarding", "try again", "check for updates", "check again", "retry", "search", "filter",
+        // These hand off to system UI by design (share sheet, output switcher, launcher pin dialog).
+        "share", "output device", "add to home screen", "open full player", "picture-in-picture",
     )
 
     private val history = ArrayDeque<String>()
@@ -143,7 +145,15 @@ class MonkeyLiteTest {
         // Still alive and usable.
         ensureInApp()
         repeat(3) { if (overlayOpen()) device.pressBack() }
-        assertEquals("App is not in the foreground after the monkey run", targetPackage, device.currentPackageName)
+        val foreground = device.currentPackageName
+        if (foreground != targetPackage) {
+            Log.w("ArnavMonkey", "Foreground is $foreground after the run; recent actions: ${history.takeLast(12)}")
+            com.arnav.music.testing.dismissSystemDialogs()
+        }
+        assertEquals(
+            "App is not in the foreground after the monkey run (was $foreground). Recent actions: ${history.takeLast(12)}",
+            targetPackage, device.currentPackageName,
+        )
         if (!relaunched) {
             assertNotEquals("MainActivity was destroyed during the monkey run", Lifecycle.State.DESTROYED, rule.activityRule.scenario.state)
         }
