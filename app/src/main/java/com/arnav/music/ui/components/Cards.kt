@@ -52,10 +52,10 @@ fun TrackCard(track: Track, onClick: () -> Unit, modifier: Modifier = Modifier, 
                 onClick()
                 // The cover flies from this card into Now Playing.
                 bounds?.let(nav.flyFrom)
-            }, onLongClick = onLongClick?.let { { haptics.longPress(); it() } })
+            }, onLongClick = { haptics.longPress(); nav.preview(track, onLongClick) }, onLongClickLabel = "Preview")
             .semantics(mergeDescendants = true) { contentDescription = "${track.title} by ${track.artist}" },
     ) {
-        Artwork(track.artworkUrl, track.id.value, Modifier.size(width).onGloballyPositioned { bounds = it.boundsInRoot() }, decodeSize = 360)
+        Artwork(track.artworkUrl, track.id.value, Modifier.pressTilt().size(width).onGloballyPositioned { bounds = it.boundsInRoot() }, decodeSize = 360)
         Spacer(Modifier.height(10.dp))
         Text(track.title, style = ArnavTheme.type.titleSmall, color = ArnavTheme.colors.content, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(caption ?: track.artist, style = ArnavTheme.type.caption, color = ArnavTheme.colors.contentMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -67,7 +67,7 @@ fun MixCard(title: String, subtitle: String, artwork: List<String>, seed: String
     val interaction = rememberInteraction()
     Column(modifier.width(width).pressScale(interaction, 0.96f).combinedClickable(interaction, indication = null, onClick = onClick)) {
         Box {
-            Mosaic(artwork, seed, Modifier.sharedArt(sharedKey).size(width))
+            Mosaic(artwork, seed, Modifier.sharedArt(sharedKey).pressTilt().size(width))
             Box(Modifier.matchParentSize().clip(RoundedCornerShape(Radius.artwork)).padding(Space.m), contentAlignment = Alignment.BottomStart) {
                 Text(title, style = ArnavTheme.type.title, color = Color.White, maxLines = 2,
                     modifier = Modifier.clip(RoundedCornerShape(Radius.xs)))
@@ -85,6 +85,7 @@ fun MomentCard(moment: Moment, onClick: () -> Unit, modifier: Modifier = Modifie
         modifier
             .then(if (large) Modifier.fillMaxWidth().aspectRatio(1.6f) else Modifier.size(width = 148.dp, height = 188.dp))
             .pressScale(interaction, 0.97f)
+            .pressTilt(if (large) 4f else 7f)
             .clip(RoundedCornerShape(if (large) Radius.xl else Radius.l))
             .combinedClickable(interaction, indication = null, role = Role.Button, onClick = onClick)
             .semantics(mergeDescendants = true) { contentDescription = "${moment.title} moment. ${moment.subtitle}" },

@@ -64,6 +64,9 @@ import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.OpenInFull
+import androidx.compose.material.icons.rounded.CloseFullscreen
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
@@ -191,6 +194,10 @@ fun PlayerLayer(
     var queueOpen by rememberSaveable { mutableStateOf(false) }
     var lyricsOpen by rememberSaveable { mutableStateOf(false) }
     val lyricsT by animateFloatAsState(if (lyricsOpen) 1f else 0f, motion.cinematic(), label = "lyrics")
+    // Full-screen lyrics: chrome steps aside, only the lines over the blurred cover remain.
+    var lyricsFull by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(lyricsOpen) { if (!lyricsOpen) lyricsFull = false }
+    val lyricsFullT by animateFloatAsState(if (lyricsFull && lyricsOpen) 1f else 0f, motion.cinematic(), label = "lyricsFull")
     val c = ArnavTheme.colors
     val ambientAllowed = settings.ambientEdgeGlow && c.isOled && !pip
     var lastTouch by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -226,11 +233,12 @@ fun PlayerLayer(
 
     // Predictive back: the player leans back with the gesture and collapses on release.
     PredictiveBackHandler(enabled = expand.targetValue > 0.5f && !pip) { events ->
-        val collapsing = !queueOpen && !lyricsOpen && !immersive
+        val collapsing = !queueOpen && !lyricsOpen && !immersive && !lyricsFull
         try {
             events.collect { ev -> if (collapsing) expand.snapTo(1f - 0.16f * ev.progress) }
             when {
                 queueOpen -> queueOpen = false
+                lyricsFull -> lyricsFull = false
                 lyricsOpen -> lyricsOpen = false
                 immersive -> immersive = false
                 else -> animateTo(0f)
@@ -329,6 +337,7 @@ fun PlayerLayer(
                 LivingBackdrop(
                     palette, track.artworkUrl, track.id.value, settings.artworkMotion, settings.gyroParallax,
                     intensity = if (immersive) 1.4f else 1f, pulse = { beat.value },
+                    artworkBlur = if (wide) 0f else lt,
                 )
                 NowPlayingContent(
                     track = track, state = state, progress = progress, palette = palette, liked = liked,
@@ -338,14 +347,16 @@ fun PlayerLayer(
                     lyricsT = lt, lyricsOpen = lyricsOpen,
                     lyricArtWidth = with(density) { (fullW * lyricScale).toDp() }, lyricArtHeight = with(density) { lyricArtH.toDp() },
                     onLyrics = { lyricsOpen = !lyricsOpen; if (lyricsOpen) immersive = false },
+                    lyricsFull = lyricsFull, onToggleFull = { lyricsFull = !lyricsFull },
                 )
             }
         }
 
         // ---- MorphBar ----
         if (e < 0.999f && dockRect == null && !pip) {
+            val singing = com.arnav.music.ui.lyrics.nowSinging(track, progress, settings.miniPlayerLyrics)
             MorphBar(
-                track = track, state = state, progress = progress, liked = liked,
+                track = track, state = state, progress = progress, liked = liked, lyricLine = singing,
                 modifier = Modifier
                     .offset { IntOffset(barLeft.roundToInt(), barTop.roundToInt()) }
                     .requiredSize(with(density) { (barRight - barLeft).toDp() }, with(density) { barH.toDp() })
@@ -386,7 +397,7 @@ fun PlayerLayer(
                 .graphicsLayer {
                     transformOrigin = TransformOrigin(0f, 0f)
                     scaleX = scale; scaleY = scale
-                    alpha = if (carousel) 0f else 1f
+                    alpha = if (carousel) 0f else if (!isYouTube) 1f - lyricsFullT else 1f
                     shadowElevation = if (pip) 0f else max(e, if (dock != null) 0.5f else 0f) * 24.dp.toPx()
                     shape = RoundedCornerShape(corner)
                     clip = true
@@ -397,14 +408,36 @@ fun PlayerLayer(
             } else {
                 TrackArtwork(
                     track = track, index = state.queue.currentIndex,
+                    revealKey = state.queue.items.firstOrNull()?.uid,
+                    revealFromRight = e < 0.5f,
                     modifier = Modifier.fillMaxSize()
-                        .pointerInput(track.id, e >= 0.99f, lyricsOpen) {
-                            if (e < 0.99f || lyricsOpen) return@pointerInput
-                            var total = 0f
-                            detectHorizontalDragGestures(onDragEnd = {
-                                if (total < -120f) actions.next() else if (total > 120f) actions.previous()
-                                total = 0f
-                            }) { _, dx -> total += dx }
+                        .pointerInput(track.id, lyricsOpen) {
+                            if (lyricsOpen) return@pointerInput
+                            // Swipe sideways to change song; pull down (like iOS) to close the player.
+                            var dx = 0f
+                            var dy = 0f
+                            var axis = 0
+                            var active = false
+                            val tracker = VelocityTracker()
+                            detectDragGestures(
+                                onDragStart = { dx = 0f; dy = 0f; axis = 0; active = expand.value >= 0.99f; tracker.resetTracking() },
+                                onDragEnd = {
+                                    if (active) when (axis) {
+                                        1 -> if (dx < -120f) actions.next() else if (dx > 120f) actions.previous()
+                                        2 -> animateTo(if (tracker.calculateVelocity().y > 1000f || expand.value < 0.75f) 0f else 1f)
+                                    }
+                                },
+                                onDragCancel = { if (active && axis == 2) animateTo(1f) },
+                            ) { change, drag ->
+                                if (!active) return@detectDragGestures
+                                tracker.addPosition(change.uptimeMillis, change.position)
+                                dx += drag.x; dy += drag.y
+                                if (axis == 0 && (abs(dx) > 18f || abs(dy) > 18f)) axis = if (abs(dx) > abs(dy)) 1 else 2
+                                if (axis == 2) {
+                                    change.consume()
+                                    scope.launch { expand.snapTo((expand.value - drag.y / (H - barTop)).coerceIn(0f, 1f)) }
+                                }
+                            }
                         }
                         .combinedClickable(
                             onClick = { if (expand.value < 0.5f) animateTo(1f) else if (lyricsOpen) lyricsOpen = false else immersive = !immersive },
@@ -426,6 +459,8 @@ fun PlayerLayer(
             CoverCarousel(
                 state = state, topPx = fullTop, itemWidthPx = fullW, screenWidthPx = W,
                 onSettle = actions.skipTo,
+                onPullDown = { dy -> scope.launch { expand.snapTo((expand.value - dy / (H - barTop)).coerceIn(0f, 1f)) } },
+                onPullEnd = { v -> animateTo(if (v > 1000f || expand.value < 0.75f) 0f else 1f) },
                 onTap = { immersive = !immersive },
                 onLongPress = { t -> haptics.longPress(); actions.onMore(t) },
             )
@@ -472,6 +507,8 @@ private fun CoverCarousel(
     onSettle: (Int) -> Unit,
     onTap: () -> Unit,
     onLongPress: (Track) -> Unit,
+    onPullDown: (Float) -> Unit = {},
+    onPullEnd: (Float) -> Unit = {},
 ) {
     val density = LocalDensity.current
     val items = state.queue.items
@@ -485,7 +522,20 @@ private fun CoverCarousel(
     val side = with(density) { ((screenWidthPx - itemWidthPx) / 2f).coerceAtLeast(0f).toDp() }
     androidx.compose.foundation.pager.HorizontalPager(
         state = pager,
-        modifier = Modifier.offset { IntOffset(0, topPx.roundToInt()) }.fillMaxWidth().height(with(density) { itemWidthPx.toDp() }),
+        modifier = Modifier.offset { IntOffset(0, topPx.roundToInt()) }.fillMaxWidth().height(with(density) { itemWidthPx.toDp() })
+            .pointerInput(Unit) {
+                // Vertical pulls close the player; the pager keeps horizontal swipes.
+                val tracker = VelocityTracker()
+                detectVerticalDragGestures(
+                    onDragStart = { tracker.resetTracking() },
+                    onDragEnd = { onPullEnd(tracker.calculateVelocity().y) },
+                    onDragCancel = { onPullEnd(0f) },
+                ) { change, dy ->
+                    tracker.addPosition(change.uptimeMillis, change.position)
+                    change.consume()
+                    onPullDown(dy)
+                }
+            },
         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = side),
         pageSpacing = 14.dp,
         key = { items[it].uid },
@@ -514,16 +564,21 @@ private fun CoverCarousel(
  */
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
-private fun TrackArtwork(track: Track, index: Int, modifier: Modifier) {
+private fun TrackArtwork(track: Track, index: Int, modifier: Modifier, revealKey: Any? = null, revealFromRight: Boolean = false) {
     val motion = ArnavTheme.motion
     var lastIndex by remember { mutableStateOf(index) }
     val forward = index >= lastIndex
     LaunchedEffect(index) { lastIndex = index }
+    // A brand-new queue (you pressed play on something) spirals the cover out from the play button.
+    var lastReveal by remember { mutableStateOf(revealKey) }
+    val spiralNow = revealKey != lastReveal && !motion.reduced
+    LaunchedEffect(revealKey) { lastReveal = revealKey }
     val canBlur = android.os.Build.VERSION.SDK_INT >= 31 && !motion.reduced
     AnimatedContent(
         targetState = track,
         contentKey = { it.id },
         transitionSpec = {
+            if (spiralNow) return@AnimatedContent (fadeIn(tween(60)) togetherWith fadeOut(tween(520))).apply { targetContentZIndex = 1f }
             val dir = if (forward) 1 else -1
             val enter = slideInHorizontally(motion.offsetSpring()) { (it * 0.18f * dir * motion.travel).toInt() } +
                 slideInVertically(motion.offsetSpring()) { (it * 0.06f * motion.travel).toInt() } +
@@ -537,12 +592,29 @@ private fun TrackArtwork(track: Track, index: Int, modifier: Modifier) {
         label = "art",
     ) { t ->
         val blur by transition.animateFloat(transitionSpec = { tween(380) }, label = "sink") { st -> if (st == EnterExitState.PostExit) 18f else 0f }
+        val spiral = remember(t.id) { spiralNow }
+        val reveal by transition.animateFloat(transitionSpec = { tween(720, easing = androidx.compose.animation.core.FastOutSlowInEasing) }, label = "spiral") { st ->
+            if (st == EnterExitState.Visible || !spiral) 1f else 0f
+        }
         Artwork(
             t.artworkUrl, t.id.value,
             Modifier.fillMaxSize().graphicsLayer {
                 if (canBlur && blur > 0.5f) {
                     val r = blur.dp.toPx()
                     renderEffect = BlurEffect(r, r, TileMode.Decal)
+                }
+                if (spiral && reveal < 0.999f) {
+                    val p = reveal
+                    // A circle growing from the play button while the cover unwinds a quarter turn.
+                    rotationZ = -24f * (1f - p)
+                    clip = true
+                    shape = androidx.compose.foundation.shape.GenericShape { sz, _ ->
+                        val cx = if (revealFromRight) sz.width * 3.6f else sz.width * 0.5f
+                        val cy = if (revealFromRight) sz.height * 0.5f else sz.height * 1.22f
+                        val far = kotlin.math.hypot(kotlin.math.max(cx, kotlin.math.abs(sz.width - cx)), kotlin.math.max(cy, kotlin.math.abs(sz.height - cy)))
+                        val rad = far * p
+                        addOval(androidx.compose.ui.geometry.Rect(cx - rad, cy - rad, cx + rad, cy + rad))
+                    }
                 }
             },
             shape = androidx.compose.ui.graphics.RectangleShape, contentDescription = null, decodeSize = 1000,
@@ -581,6 +653,7 @@ private fun MorphBar(
     liked: Boolean,
     modifier: Modifier,
     artWidthPx: Float,
+    lyricLine: String? = null,
     onExpand: () -> Unit,
     onDragExpand: (Float) -> Unit,
     onDragEnd: (Float) -> Unit,
@@ -624,9 +697,23 @@ private fun MorphBar(
             }, modifier = Modifier.weight(1f), label = "bartitle") { t ->
                 Column {
                     Text(t.title, style = ArnavTheme.type.titleSmall, color = c.content, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (t.source == SourceType.YOUTUBE) { SourceBadge(true); Spacer(Modifier.width(6.dp)) }
-                        Text(t.artist, style = ArnavTheme.type.bodySmall, color = c.contentMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    // "Now singing": the current lyric line replaces the artist while synced lyrics play.
+                    AnimatedContent(
+                        lyricLine, transitionSpec = {
+                            (fadeIn(motion.fast()) + slideInVertically { it / 2 }) togetherWith (fadeOut(motion.fast()) + slideOutVertically { -it / 2 })
+                        }, label = "singing",
+                    ) { line ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (line != null) {
+                                Icon(Icons.Rounded.Lyrics, null, tint = c.accent, modifier = Modifier.size(12.dp))
+                                Spacer(Modifier.width(5.dp))
+                                Text(line, style = ArnavTheme.type.bodySmall, color = c.content.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.semantics { contentDescription = "Now singing: $line" })
+                            } else {
+                                if (t.source == SourceType.YOUTUBE) { SourceBadge(true); Spacer(Modifier.width(6.dp)) }
+                                Text(t.artist, style = ArnavTheme.type.bodySmall, color = c.contentMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
                     }
                 }
             }
@@ -661,6 +748,8 @@ private fun NowPlayingContent(
     lyricArtWidth: androidx.compose.ui.unit.Dp = 60.dp,
     lyricArtHeight: androidx.compose.ui.unit.Dp = 60.dp,
     onLyrics: () -> Unit = {},
+    lyricsFull: Boolean = false,
+    onToggleFull: () -> Unit = {},
 ) {
     val on = Color(palette.onBackdrop)
     val muted = Color(palette.onBackdropMuted)
@@ -674,6 +763,7 @@ private fun NowPlayingContent(
         Modifier.fillMaxSize().padding(WindowInsetsPaddingStatusNav()),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        androidx.compose.animation.AnimatedVisibility(!(lyricsOpen && lyricsFull && !wide)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = Space.s), verticalAlignment = Alignment.CenterVertically) {
             ArnavIconButton(Icons.Rounded.KeyboardArrowDown, "Collapse player", onCollapse, tint = on)
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -685,6 +775,7 @@ private fun NowPlayingContent(
                 }
             }
             ArnavIconButton(Icons.Rounded.MoreHoriz, "More actions", { actions.onMore(track) }, tint = on)
+        }
         }
         if (wide) {
             Row(Modifier.fillMaxSize()) {
@@ -737,27 +828,42 @@ private fun NowPlayingContent(
                 }
                 if (lyricsT > 0.001f) {
                     // Apple Music-style lyrics: small cover + title up top, big synced lines, compact controls below.
-                    Column(Modifier.fillMaxSize().graphicsLayer { alpha = ((lyricsT - 0.25f) / 0.75f).coerceIn(0f, 1f) }) {
-                        Row(
-                            Modifier.fillMaxWidth().height(lyricArtHeight + 2.dp).padding(start = 24.dp + lyricArtWidth + Space.m, end = Space.l),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(track.title, style = ArnavTheme.type.titleSmall, color = on, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(track.artist, style = ArnavTheme.type.bodySmall, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { actions.openArtist(track.artist) })
+                    Box(Modifier.fillMaxSize().graphicsLayer { alpha = ((lyricsT - 0.25f) / 0.75f).coerceIn(0f, 1f) }) {
+                    Column(Modifier.fillMaxSize()) {
+                        val video = track.source == SourceType.YOUTUBE
+                        androidx.compose.animation.AnimatedVisibility(!lyricsFull) {
+                            Row(
+                                Modifier.fillMaxWidth().height(lyricArtHeight + 2.dp).padding(start = 24.dp + lyricArtWidth + Space.m, end = Space.l),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(track.title, style = ArnavTheme.type.titleSmall, color = on, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(track.artist, style = ArnavTheme.type.bodySmall, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { actions.openArtist(track.artist) })
+                                }
+                                HeartButton(liked, { actions.toggleLike(track) }, size = 22.dp, tint = on)
                             }
-                            HeartButton(liked, { actions.toggleLike(track) }, size = 22.dp, tint = on)
                         }
+                        // The YouTube player stays visible in full-screen lyrics too: keep its corner clear.
+                        if (lyricsFull && video) Spacer(Modifier.height(lyricArtHeight + 58.dp))
                         com.arnav.music.ui.lyrics.LyricsPanel(
                             track = track, progress = progress, isPlaying = state.isPlaying, onSeek = actions.seekTo,
                             on = on, muted = muted, accent = accent,
                             modifier = Modifier.weight(1f).fillMaxWidth(),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(top = Space.xl, bottom = Space.xxl),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(top = if (lyricsFull) Space.xxl else Space.xl, bottom = Space.xxl),
                         )
-                        Column(Modifier.fillMaxWidth().padding(horizontal = 28.dp)) {
-                            Transport(track, state, progress, on, muted, accent, actions, onQueue, onLyrics, lyricsOpen)
+                        androidx.compose.animation.AnimatedVisibility(!lyricsFull) {
+                            Column(Modifier.fillMaxWidth().padding(horizontal = 28.dp)) {
+                                Transport(track, state, progress, on, muted, accent, actions, onQueue, onLyrics, lyricsOpen)
+                            }
                         }
+                    }
+                    ArnavIconButton(
+                        if (lyricsFull) Icons.Rounded.CloseFullscreen else Icons.Rounded.OpenInFull,
+                        if (lyricsFull) "Exit full-screen lyrics" else "Full-screen lyrics",
+                        onToggleFull, tint = muted, size = 18.dp,
+                        modifier = Modifier.align(Alignment.TopEnd).padding(top = if (lyricsFull) 0.dp else lyricArtHeight + 4.dp, end = Space.s),
+                    )
                     }
                 }
             }

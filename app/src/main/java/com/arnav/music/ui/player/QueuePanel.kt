@@ -27,6 +27,9 @@ import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.rounded.Timeline
+import androidx.compose.material.icons.rounded.Shuffle
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.automirrored.rounded.ViewList
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -79,6 +82,8 @@ fun QueuePanel(
     onSkipTo: (Int) -> Unit,
     onSave: () -> Unit,
     onClose: () -> Unit,
+    onShuffle: (() -> Unit)? = null,
+    onHarmonicMix: (() -> Unit)? = null,
 ) {
     val c = ArnavTheme.colors
     val haptics = ArnavTheme.haptics
@@ -102,9 +107,12 @@ fun QueuePanel(
             }
             ArnavIconButton(Icons.AutoMirrored.Rounded.PlaylistAdd, "Save queue as playlist", onSave)
         }
-        Row(Modifier.padding(horizontal = Space.gutter), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(Space.s)) {
+        Row(Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = Space.gutter), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(Space.s)) {
             Pill("List", !journey, { journey = false }, leading = Icons.AutoMirrored.Rounded.ViewList)
             Pill("Journey", journey, { journey = true }, leading = Icons.Rounded.Timeline)
+            // Reordering happens in place: every row glides to its new slot.
+            if (onShuffle != null) Pill("Shuffle", q.shuffled, { haptics.select(); onShuffle() }, leading = Icons.Rounded.Shuffle)
+            if (onHarmonicMix != null) Pill("Harmonic mix", false, { haptics.select(); onHarmonicMix() }, leading = Icons.Rounded.GraphicEq)
         }
         Spacer(Modifier.height(Space.s))
         if (q.upNext.isEmpty()) {
@@ -126,7 +134,7 @@ fun QueuePanel(
                     val lift by animateFloatAsState(if (dragging) 1f else 0f, motion.responsive(), label = "lift")
                     Row(
                         Modifier
-                            .then(if (dragging) Modifier else Modifier.animateItem(placementSpec = spring(dampingRatio = 0.85f, stiffness = 500f, visibilityThreshold = IntOffset(1, 1))))
+                            .then(if (dragging) Modifier else Modifier.animateItem(placementSpec = spring(dampingRatio = 0.8f, stiffness = 280f, visibilityThreshold = IntOffset(1, 1))))
                             .zIndex(if (dragging) 1f else 0f)
                             .graphicsLayer {
                                 translationY = if (dragging) dragOffset else 0f

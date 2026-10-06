@@ -1,5 +1,6 @@
 package com.arnav.music.feature.collection
 
+import com.arnav.music.ui.theme.AccentScope
 import com.arnav.music.ui.sharedArt
 import com.arnav.music.ui.ArtKeys
 import androidx.compose.foundation.background
@@ -233,6 +234,9 @@ private fun CollectionScaffold(
     val palette = rememberArtworkPalette(art.firstOrNull(), if (c.isOled) SurfaceMode.OLED else if (c.isDark) SurfaceMode.DARK else SurfaceMode.LIGHT)
     val playingId = player.current?.id
 
+    // The page borrows its accent from its own cover: Play button, now-playing marks, cursor.
+    AccentScope(if (art.isEmpty()) null else Color(palette.accent)) {
+    val c = ArnavTheme.colors
     Box(Modifier.fillMaxSize()) {
         // Dynamic hero background tinted by the collection's artwork.
         Box(
@@ -328,6 +332,7 @@ private fun CollectionScaffold(
                     modifier = Modifier.fillMaxWidth().padding(Space.gutter), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
         }
+    }
     }
 }
 

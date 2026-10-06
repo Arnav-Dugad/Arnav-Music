@@ -17,6 +17,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import com.arnav.music.core.perf.EffectsBudget
@@ -122,5 +123,21 @@ fun ArnavMusicTheme(
         LocalArtworkPalette provides artwork,
     ) {
         MaterialTheme(colorScheme = scheme, typography = typography, content = content)
+    }
+}
+
+/**
+ * Re-tints the accent for one part of the UI (e.g. a playlist page takes its accent from its cover).
+ * The change animates so moving between pages never snaps colours.
+ */
+@Composable
+fun AccentScope(accent: Color?, content: @Composable () -> Unit) {
+    val base = LocalColors.current
+    if (accent == null) { content(); return }
+    val motion = LocalMotion.current
+    val animated by androidx.compose.animation.animateColorAsState(accent, androidx.compose.animation.core.tween(if (motion.reduced) 0 else 600), label = "accentScope")
+    val onAccent = if (animated.luminance() > 0.55f) Color(0xFF0B0B0F) else Color.White
+    CompositionLocalProvider(LocalColors provides base.copy(accent = animated, onAccent = onAccent, accentSoft = animated.copy(alpha = if (base.isDark) 0.22f else 0.16f))) {
+        content()
     }
 }

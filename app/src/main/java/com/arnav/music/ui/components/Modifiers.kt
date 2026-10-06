@@ -19,6 +19,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.launch
 import com.arnav.music.ui.theme.ArnavTheme
 
 /** Press compression: content dips to [scale] immediately on touch, springs back on release. */
@@ -52,3 +56,43 @@ fun Modifier.shimmer(): Modifier = composed {
 fun rememberInteraction() = remember { MutableInteractionSource() }
 
 fun Color.scale(alpha: Float) = copy(alpha = this.alpha * alpha)
+
+/**
+ * The surface tilts toward the finger while pressed (the touched side sinks a few degrees, like
+ * pressing a real card) and springs flat on release. Never consumes the touch; off under reduced motion.
+ */
+fun Modifier.pressTilt(maxDegrees: Float = 7f): Modifier = composed {
+    val motion = ArnavTheme.motion
+    if (motion.reduced) return@composed this
+    val rx = remember { androidx.compose.animation.core.Animatable(0f) }
+    val ry = remember { androidx.compose.animation.core.Animatable(0f) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val follow = androidx.compose.animation.core.spring<Float>(dampingRatio = 0.7f, stiffness = 700f)
+    val settle = androidx.compose.animation.core.spring<Float>(dampingRatio = 0.45f, stiffness = 260f)
+    this
+        .pointerInput(Unit) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                fun aim(p: Offset) {
+                    val nx = ((p.x / size.width.coerceAtLeast(1)) - 0.5f).coerceIn(-0.5f, 0.5f) * 2f
+                    val ny = ((p.y / size.height.coerceAtLeast(1)) - 0.5f).coerceIn(-0.5f, 0.5f) * 2f
+                    scope.launch { ry.animateTo(nx * maxDegrees, follow) }
+                    scope.launch { rx.animateTo(-ny * maxDegrees, follow) }
+                }
+                aim(down.position)
+                while (true) {
+                    val ev = awaitPointerEvent()
+                    val change = ev.changes.firstOrNull { it.id == down.id } ?: break
+                    if (!change.pressed) break
+                    aim(change.position)
+                }
+                scope.launch { rx.animateTo(0f, settle) }
+                scope.launch { ry.animateTo(0f, settle) }
+            }
+        }
+        .graphicsLayer {
+            rotationX = rx.value
+            rotationY = ry.value
+            cameraDistance = 14f * density
+        }
+}

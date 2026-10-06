@@ -37,10 +37,15 @@ class AudioAnalysis(
     val onsetsPerSecond: Float,
     /** One unsigned byte (0..255) per envelope step. */
     val envelope: ByteArray,
+    /** Musical key ([KeyNames] numbering, −1 when unsure). */
+    val key: KeyEstimate = KeyEstimate.NONE,
+    /** Where the music starts and the closing fade/silence begins. */
+    val sections: TrackSections = TrackSections.NONE,
 )
 
 /**
- * Small, dependency-free audio analysis for on-device features (tempo, loudness, energy).
+ * Small, dependency-free audio analysis for on-device features (tempo, loudness, energy; key via
+ * [KeyDetector], intro/outro via [SectionDetector]).
  * Input is mono PCM in [-1, 1]; tuned for ~11 025 Hz but works at any rate.
  * Every function takes an explicit `length` so callers can pass a partially filled buffer.
  */
@@ -70,6 +75,8 @@ object AudioDsp {
             energy = energyScore(loudness, rate, tempo.bpm),
             onsetsPerSecond = rate,
             envelope = energyEnvelope(samples, sampleRate, n, envelopeStepMs),
+            key = KeyDetector.detect(samples, sampleRate, n),
+            sections = SectionDetector.detect(samples, sampleRate, n),
         )
     }
 

@@ -1,5 +1,6 @@
 package com.arnav.music.ui
 
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import android.Manifest
@@ -166,6 +167,8 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
     var sheet by remember { mutableStateOf<SheetRequest?>(null) }
     var launchOrigin by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     var dockRect by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    var previewing by remember { mutableStateOf<Pair<com.arnav.music.domain.model.Track, (() -> Unit)?>?>(null) }
+    var resumeAfterPreview by remember { mutableStateOf(false) }
     var paletteOpen by rememberSaveable { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val palette = com.arnav.music.ui.theme.LocalArtworkPalette.current ?: com.arnav.music.domain.color.ArtworkPalette.neutral(surfaceMode(settings))
@@ -182,6 +185,12 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
                     launchOrigin = bounds
                     scope.launch { expand.snapTo(0f); expand.animateTo(1f, motion.cinematic()) }
                 }
+            },
+            preview = { t, more ->
+                // Pause what's playing; it resumes when the preview closes.
+                resumeAfterPreview = vm.player.state.value.isPlaying
+                if (resumeAfterPreview) vm.player.pause()
+                previewing = t to more
             },
             beforeTopLevel = {
                 sheet = null
@@ -276,14 +285,17 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
                             togglePlay = vm.player::togglePlay, next = vm.player::next, previous = vm.player::previous,
                             toggleLike = { vm.toggleLike(it) },
                             openArtist = { navigator.go(Routes.artist(it)) },
-                            queue = { QueuePanel(state, vm.player::move, vm.player::removeAt, { vm.player.skipTo(it) }, { vm.saveQueueAsPlaylist() }, {}) },
+                            queue = { QueuePanel(state, vm.player::move, vm.player::removeAt, { vm.player.skipTo(it) }, { vm.saveQueueAsPlaylist() }, {}, onShuffle = vm.player::toggleShuffle) },
                         )
                     }
                 }
             }
 
             if (!wide && !pip) {
-                BottomBar(selectedTab, onSelect = { r -> navigator.topLevel(r) }, modifier = Modifier.align(Alignment.BottomCenter))
+                BottomBar(
+                    selectedTab, onSelect = { r -> navigator.topLevel(r) }, modifier = Modifier.align(Alignment.BottomCenter),
+                    bleed = if (hasPlayer) Color(palette.accent) else null,
+                )
             }
 
             if (hasPlayer) {
@@ -310,7 +322,7 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
                     launchOrigin = launchOrigin,
                     onLaunchConsumed = { launchOrigin = null },
                     queueContent = { close ->
-                        QueuePanel(state, vm.player::move, vm.player::removeAt, { vm.player.skipTo(it) }, { vm.saveQueueAsPlaylist() }, close)
+                        QueuePanel(state, vm.player::move, vm.player::removeAt, { vm.player.skipTo(it) }, { vm.saveQueueAsPlaylist() }, close, onShuffle = vm.player::toggleShuffle)
                     },
                 )
             }
@@ -328,6 +340,19 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
                         Text(label, style = ArnavTheme.type.label, color = c.accent, modifier = Modifier.clip(RoundedCornerShape(Radius.s)).clickable { data.performAction() }.padding(Space.s))
                     }
                 }
+            }
+
+            previewing?.let { (t, more) ->
+                if (!pip) com.arnav.music.ui.player.CoverPreview(
+                    track = t,
+                    onDismiss = {
+                        previewing = null
+                        if (resumeAfterPreview) { resumeAfterPreview = false; vm.player.play() }
+                    },
+                    onPlay = { resumeAfterPreview = false; vm.play(listOf(t), 0) },
+                    onQueue = { vm.addToQueue(t) },
+                    onMore = more,
+                )
             }
 
             AnimatedVisibility(paletteOpen && !pip, enter = fadeIn(motion.fast()) + scaleIn(motion.expressive(), 0.97f), exit = fadeOut(motion.fast()) + scaleOut(motion.fast(), 0.98f)) {
@@ -358,15 +383,22 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
 }
 
 @Composable
-private fun BottomBar(selectedTab: String, onSelect: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun BottomBar(selectedTab: String, onSelect: (String) -> Unit, modifier: Modifier = Modifier, bleed: Color? = null) {
     val c = ArnavTheme.colors
     val motion = ArnavTheme.motion
     val haptics = ArnavTheme.haptics
     val selectedIndex = destinations.indexOfFirst { d -> d.route == selectedTab }
+    // While music plays, the artwork's colour bleeds up into the bar from below.
+    val bleedColor by animateColorAsState(bleed ?: Color.Transparent, androidx.compose.animation.core.tween(if (motion.reduced) 0 else 900), label = "bleed")
     Box(
         modifier
             .fillMaxWidth()
             .glass(GlassMaterial.Thick, RoundedCornerShape(topStart = Radius.l, topEnd = Radius.l))
+            .drawBehind {
+                if (bleedColor.alpha > 0.01f) {
+                    drawRect(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(bleedColor.copy(alpha = 0f), bleedColor.copy(alpha = bleedColor.alpha * (if (c.isDark) 0.20f else 0.12f)))))
+                }
+            }
             .navigationBarsPadding()
             .height(68.dp),
     ) {

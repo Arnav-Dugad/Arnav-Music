@@ -50,6 +50,8 @@ fun LivingBackdrop(
     intensity: Float = 1f,
     /** 0..1 beat pulse for analyzed on-device songs; read during drawing only (no recomposition). */
     pulse: () -> Float = { 0f },
+    /** 0..1: the cover itself, heavily blurred across the whole screen (lyrics mode). */
+    artworkBlur: Float = 0f,
 ) {
     val budget = ArnavTheme.budget
     val colors = ArnavTheme.colors
@@ -94,6 +96,17 @@ fun LivingBackdrop(
                 Modifier.fillMaxSize().graphicsLayer { alpha = 0.35f * intensity; scaleX = 1.3f; scaleY = 1.3f }.blur(80.dp),
                 shape = androidx.compose.ui.graphics.RectangleShape, decodeSize = 128,
             )
+        }
+        // Lyrics mode: the cover fills the screen, blurred (real blur on Android 12+, a tiny decoded
+        // bitmap stretched smooth elsewhere), under a palette-tinted veil that keeps lines readable.
+        if (artworkBlur > 0.01f) {
+            val blurMod = if (Build.VERSION.SDK_INT >= 31) Modifier.blur(56.dp) else Modifier
+            Artwork(
+                artworkUrl, seed,
+                Modifier.fillMaxSize().graphicsLayer { alpha = artworkBlur; scaleX = 1.35f; scaleY = 1.35f }.then(blurMod),
+                shape = androidx.compose.ui.graphics.RectangleShape, decodeSize = 40,
+            )
+            Canvas(Modifier.fillMaxSize()) { drawRect(base.copy(alpha = 0.55f * artworkBlur)) }
         }
         // Bottom scrim guarantees control legibility over any artwork.
         Canvas(Modifier.fillMaxSize()) {

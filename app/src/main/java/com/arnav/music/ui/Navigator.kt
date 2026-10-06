@@ -19,6 +19,8 @@ class Navigator(
     val share: (Track) -> Unit,
     /** Opens Now Playing with the artwork flying from [bounds] (root coordinates, px). */
     val flyFrom: (androidx.compose.ui.geometry.Rect) -> Unit = {},
+    /** Long-press "peek": plays a short excerpt of [Track]; the optional action opens its menu. */
+    val preview: (Track, (() -> Unit)?) -> Unit = { _, _ -> },
     /** Called before a tab switch: collapses the player and closes sheets/overlays. */
     private val beforeTopLevel: () -> Unit = {},
 ) {
