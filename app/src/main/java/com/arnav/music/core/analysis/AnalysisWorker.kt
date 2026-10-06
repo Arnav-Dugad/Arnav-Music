@@ -16,6 +16,7 @@ import com.arnav.music.core.db.AudioFeaturesEntity
 import com.arnav.music.core.local.LocalMediaSource
 import com.arnav.music.core.settings.SettingsRepository
 import com.arnav.music.domain.audio.AudioDsp
+import com.arnav.music.domain.lyrics.VocalActivityMeter
 import com.arnav.music.domain.model.Track
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -28,7 +29,8 @@ import org.koin.core.context.GlobalContext
 import java.util.concurrent.TimeUnit
 
 /**
- * Analyzes local songs on device (tempo, key, loudness, energy envelope, intro/outro) in small batches.
+ * Analyzes local songs on device (tempo, key, loudness, energy envelope, intro/outro, and a vocal
+ * activity curve for auto-timed lyrics, see [VocalActivityStore]) in small batches.
  * Periodic runs only happen while charging; [runNow] skips that constraint. Nothing leaves the phone.
  */
 class AnalysisWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
@@ -46,6 +48,7 @@ class AnalysisWorker(context: Context, params: WorkerParameters) : CoroutineWork
         fun turnedOff() = !settings.settings.value.analyzeLocalAudio && (!manual || enabledAtStart)
 
         val dao = db.audioFeatures()
+        val vocals = VocalActivityStore(applicationContext)
         val done = dao.analyzedIds(AudioFeatures.VERSION).toHashSet()
         val pending = local.tracks().first().filter { it.id.value !in done && it.playbackRef.isNotBlank() }
         val batch = pending.take(MAX_PER_RUN)
@@ -55,7 +58,7 @@ class AnalysisWorker(context: Context, params: WorkerParameters) : CoroutineWork
             val row: AudioFeaturesEntity? = try {
                 withContext(Dispatchers.Default) {
                     ensureActive()
-                    analyze(track, this)
+                    analyze(track, this, vocals)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -73,10 +76,17 @@ class AnalysisWorker(context: Context, params: WorkerParameters) : CoroutineWork
     }
 
     /** Returns null only when the work was stopped while decoding. */
-    private fun analyze(track: Track, scope: CoroutineScope): AudioFeaturesEntity? {
+    private fun analyze(track: Track, scope: CoroutineScope, vocals: VocalActivityStore): AudioFeaturesEntity? {
+        // Mid/side vocal-band meter, fed while decoding (the side channel is never stored).
+        val stereo = object : StereoSink {
+            var meter: VocalActivityMeter? = null
+            override fun begin(sampleRate: Int) { meter = VocalActivityMeter(sampleRate, AudioFeatures.ENVELOPE_STEP_MS) }
+            override fun push(mid: Float, side: Float) { meter?.push(mid, side) }
+        }
         val decoded = AudioDecoder.decode(
             applicationContext, Uri.parse(track.playbackRef),
             isCancelled = { isStopped || !scope.isActive },
+            stereo = stereo,
         )
         if (isStopped || !scope.isActive) return null
         if (decoded == null || decoded.length < decoded.sampleRate * MIN_SECONDS) return failedRow(track.id.value)
@@ -91,6 +101,7 @@ class AnalysisWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val decodedMs = decoded.length * 1000L / decoded.sampleRate
         val knownMs = track.durationMs ?: 0L
         val truncated = decodedMs >= (AudioDecoder.MAX_SECONDS - 1) * 1000L || (knownMs > 0L && knownMs > decodedMs + 3_000L)
+        stereo.meter?.let { m -> vocals.write(track.id.value, m.finish(), m.stepMs) }
         return AudioFeaturesEntity(
             trackId = track.id.value,
             bpm = a.tempo.bpm,

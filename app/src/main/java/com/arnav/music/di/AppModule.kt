@@ -108,8 +108,10 @@ val appModule = module {
             androidContext(), get<ArnavDatabase>().lyrics(),
             online = com.arnav.music.core.lyrics.LrclibClient(get(), "ArnavMusic/${com.arnav.music.BuildConfig.VERSION_NAME} (https://github.com/Arnav-Dugad/Arnav-Music)"),
             onlineEnabled = { settings.settings.value.onlineLyrics },
+            features = get<ArnavDatabase>().audioFeatures(),
         )
     }
+    single { com.arnav.music.core.lyrics.AiLyrics(androidContext(), get(), get(), get()) }
     single { com.arnav.music.core.importer.FileImporter(androidContext()) }
     single { com.arnav.music.core.importer.ImportMatcher(androidContext(), get(), get(), get(), get()) }
     single { PlaybackController(androidContext(), get(), get(), get(), get(), get(), get()) }

@@ -491,7 +491,7 @@ private fun PrivacyPage(vm: SettingsViewModel) {
             Divider()
             PrivacyFact("Synced to your account", if (user != null && s.cloudSync) "Liked YouTube songs and Arnav playlists (Firebase, your private space)" else "Nothing — not signed in or sync is off")
             Divider()
-            PrivacyFact("What Arnav AI sees", if (s.aiEnabled) "Only the request you type" + if (s.aiPersonalization) ", plus your top artist names and style hints" else "" else "Nothing — cloud AI is off")
+            PrivacyFact("What Arnav AI sees", if (s.aiEnabled) "The request you type" + (if (s.aiPersonalization) ", your top artist names and style hints" else "") + (if (s.autoAiLyrics) ", and the audio (or YouTube link) of songs it writes lyrics for" else "") else "Nothing — cloud AI is off")
             Divider()
             PrivacyFact("YouTube", "Search text and video ids go to Google's YouTube Data API using your API key. No YouTube account is linked.")
             Divider()

@@ -19,9 +19,20 @@ import kotlin.math.sin
 class DecodedAudio(val samples: FloatArray, val length: Int, val sampleRate: Int, val sourceChannels: Int)
 
 /**
+ * Optional second output of [AudioDecoder.decode]: every output sample as mid ((L+R)/2, the same as
+ * the mono output) and side ((L−R)/2, 0 for mono sources), at the output rate. Streaming, so the
+ * side channel never has to be kept in memory.
+ */
+interface StereoSink {
+    fun begin(sampleRate: Int)
+    fun push(mid: Float, side: Float)
+}
+
+/**
  * Decodes a local audio file into low-rate mono PCM for analysis: MediaExtractor + MediaCodec
  * (synchronous API), downmix to mono, anti-alias low-pass and integer decimation to at most
- * ~11 025 Hz. Only the first [MAX_SECONDS] are decoded so memory stays bounded.
+ * ~11 025 Hz ([targetRate] may ask for another ceiling, e.g. 16 kHz for AI transcription). Only the
+ * first [MAX_SECONDS] are decoded so memory stays bounded. A [stereo] sink also receives mid/side.
  */
 object AudioDecoder {
     const val TARGET_RATE = 11_025
@@ -29,7 +40,14 @@ object AudioDecoder {
     private const val TIMEOUT_US = 10_000L
     private const val MAX_IDLE_POLLS = 300
 
-    fun decode(context: Context, uri: Uri, maxSeconds: Int = MAX_SECONDS, isCancelled: () -> Boolean = { false }): DecodedAudio? {
+    fun decode(
+        context: Context,
+        uri: Uri,
+        maxSeconds: Int = MAX_SECONDS,
+        isCancelled: () -> Boolean = { false },
+        targetRate: Int = TARGET_RATE,
+        stereo: StereoSink? = null,
+    ): DecodedAudio? {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         var started = false
@@ -101,8 +119,9 @@ object AudioDecoder {
                         if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) outputDone = true
                         val buf = dec.getOutputBuffer(outIndex)
                         if (buf != null && info.size > 0 && (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
-                            val rs = resampler ?: Resampler(srcRate).also { r ->
+                            val rs = resampler ?: Resampler(srcRate, targetRate, stereo).also { r ->
                                 resampler = r
+                                stereo?.begin(r.outRate)
                                 val estSeconds = if (durationUs > 0) ceil(durationUs / 1_000_000.0).toInt() + 2 else maxSeconds
                                 maxSamples = maxSeconds * r.outRate
                                 out = FloatArray(min(maxSamples, estSeconds.coerceAtLeast(10) * r.outRate))
@@ -144,14 +163,19 @@ object AudioDecoder {
 
     /**
      * Streaming downmix + low-pass + integer decimation. The output rate is the source rate divided
-     * by the smallest integer that brings it to ≤ [TARGET_RATE] (44.1 kHz → 11 025 Hz, 48 kHz → 9 600 Hz).
+     * by the smallest integer that brings it to ≤ [targetRate] (44.1 kHz → 11 025 Hz, 48 kHz → 9 600 Hz
+     * by default). With a [stereo] sink the side signal (first two channels) is filtered and
+     * decimated the same way.
      */
-    private class Resampler(srcRate: Int) {
-        private val factor = maxOf(1, ceil(srcRate.toDouble() / TARGET_RATE).toInt())
+    private class Resampler(srcRate: Int, targetRate: Int, private val stereo: StereoSink?) {
+        private val factor = maxOf(1, ceil(srcRate.toDouble() / targetRate.coerceAtLeast(1_000)).toInt())
         val outRate = maxOf(1, srcRate / factor)
         private val lp1: AudioDsp.Biquad? = if (factor > 1) lowPass(srcRate.toDouble(), 0.42 * outRate) else null
         private val lp2: AudioDsp.Biquad? = if (factor > 1) lowPass(srcRate.toDouble(), 0.42 * outRate) else null
+        private val sideLp1: AudioDsp.Biquad? = if (factor > 1 && stereo != null) lowPass(srcRate.toDouble(), 0.42 * outRate) else null
+        private val sideLp2: AudioDsp.Biquad? = if (factor > 1 && stereo != null) lowPass(srcRate.toDouble(), 0.42 * outRate) else null
         private var acc = 0.0
+        private var sideAcc = 0.0
         private var count = 0
 
         /** Feeds interleaved PCM; returns false once [sink] refuses more samples. */
@@ -163,16 +187,26 @@ object AudioDecoder {
                     val frames = fb.remaining() / ch
                     for (i in 0 until frames) {
                         var s = 0f
-                        for (c in 0 until ch) s += fb.get()
-                        if (!push(s / ch, sink)) return false
+                        var side = 0f
+                        for (c in 0 until ch) {
+                            val v = fb.get()
+                            s += v
+                            if (c == 0) side += v else if (c == 1) side -= v
+                        }
+                        if (!push(s / ch, if (ch >= 2) side * 0.5f else 0f, sink)) return false
                     }
                 }
                 AudioFormat.ENCODING_PCM_8BIT -> {
                     val frames = buf.remaining() / ch
                     for (i in 0 until frames) {
                         var s = 0f
-                        for (c in 0 until ch) s += ((buf.get().toInt() and 0xFF) - 128) / 128f
-                        if (!push(s / ch, sink)) return false
+                        var side = 0f
+                        for (c in 0 until ch) {
+                            val v = ((buf.get().toInt() and 0xFF) - 128) / 128f
+                            s += v
+                            if (c == 0) side += v else if (c == 1) side -= v
+                        }
+                        if (!push(s / ch, if (ch >= 2) side * 0.5f else 0f, sink)) return false
                     }
                 }
                 else -> {
@@ -180,22 +214,36 @@ object AudioDecoder {
                     val frames = sb.remaining() / ch
                     for (i in 0 until frames) {
                         var s = 0f
-                        for (c in 0 until ch) s += sb.get() / 32768f
-                        if (!push(s / ch, sink)) return false
+                        var side = 0f
+                        for (c in 0 until ch) {
+                            val v = sb.get() / 32768f
+                            s += v
+                            if (c == 0) side += v else if (c == 1) side -= v
+                        }
+                        if (!push(s / ch, if (ch >= 2) side * 0.5f else 0f, sink)) return false
                     }
                 }
             }
             return true
         }
 
-        private fun push(x: Float, sink: (Float) -> Boolean): Boolean {
-            if (factor == 1) return sink(x.coerceIn(-1f, 1f))
+        private fun push(x: Float, side: Float, sink: (Float) -> Boolean): Boolean {
+            if (factor == 1) {
+                val v = x.coerceIn(-1f, 1f)
+                stereo?.push(v, side.coerceIn(-1f, 1f))
+                return sink(v)
+            }
             val y = lp2!!.process(lp1!!.process(x.toDouble()))
             acc += y
+            if (stereo != null) sideAcc += sideLp2!!.process(sideLp1!!.process(side.toDouble()))
             if (++count == factor) {
                 val v = (acc / factor).toFloat().coerceIn(-1f, 1f)
                 acc = 0.0
                 count = 0
+                if (stereo != null) {
+                    stereo.push(v, (sideAcc / factor).toFloat().coerceIn(-1f, 1f))
+                    sideAcc = 0.0
+                }
                 return sink(v)
             }
             return true

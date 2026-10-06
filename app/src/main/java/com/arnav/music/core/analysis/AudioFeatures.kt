@@ -10,8 +10,11 @@ object AudioFeatures {
     /** One envelope byte per this many milliseconds of audio. */
     const val ENVELOPE_STEP_MS = 500L
 
-    /** Bump when the analysis changes; older rows are then re-analyzed. 2: key, intro, outro. */
-    const val VERSION = 2
+    /**
+     * Bump when the analysis changes; older rows are then re-analyzed. 2: key, intro, outro.
+     * 3: vocal-activity curve (stored as a file by [VocalActivityStore], not in the row).
+     */
+    const val VERSION = 3
 
     /** Short human label for an energy score, e.g. "High energy". */
     fun energyLabel(energy: Float): String = when {

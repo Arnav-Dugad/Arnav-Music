@@ -102,7 +102,7 @@ object TranscriptionCheck {
         if (looksLikeRefusal) return TranscriptionVerdict.Rejected("refusal")
         if (timedText > 0) {
             // A couple of timestamps only: keep everything as plain text.
-            val merged = text.split('\n').map { l -> stampPrefix.find(l.trim())?.groupValues?.get(2)?.let(::stripDecoration) ?: stripDecoration(l.trim()) }
+            val merged = text.split('\n').filterNot { it.trim().startsWith("```") }.map { l -> stampPrefix.find(l.trim())?.groupValues?.get(2)?.let(::stripDecoration) ?: stripDecoration(l.trim()) }
             return checkPlain(merged.filterNot { LyricAligner.isSectionLabel(it) || instrumentalMarker.matches(it) })
         }
         return checkPlain(untimed)

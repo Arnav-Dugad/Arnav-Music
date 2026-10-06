@@ -2,10 +2,14 @@ package com.arnav.music.core.lyrics
 
 import android.content.Context
 import android.net.Uri
+import com.arnav.music.core.analysis.VocalActivityStore
+import com.arnav.music.core.db.AudioFeaturesDao
 import com.arnav.music.core.db.LyricsDao
 import com.arnav.music.core.db.LyricsEntity
 import com.arnav.music.domain.lyrics.EmbeddedLyrics
 import com.arnav.music.domain.lyrics.LrcParser
+import com.arnav.music.domain.lyrics.LyricAligner
+import com.arnav.music.domain.lyrics.LyricLine
 import com.arnav.music.domain.lyrics.Lyrics
 import com.arnav.music.domain.lyrics.RatePacer
 import com.arnav.music.domain.model.SourceType
@@ -16,7 +20,11 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
@@ -44,8 +52,11 @@ data class LyricsPackResult(
 sealed interface LyricsState {
     data object Loading : LyricsState
 
-    /** [source] is "embedded", "file" or "pasted"; [raw] is the stored LRC/plain text (for editing). */
-    data class Ready(val lyrics: Lyrics, val source: String, val raw: String = "") : LyricsState
+    /**
+     * [source] is one of the `SOURCE_*` constants; [raw] is the stored LRC/plain text (for editing).
+     * [autoTimed]: the saved lyrics are plain and [lyrics] holds estimated timing ("Auto-timed").
+     */
+    data class Ready(val lyrics: Lyrics, val source: String, val raw: String = "", val autoTimed: Boolean = false) : LyricsState
 
     data object None : LyricsState
 }
@@ -54,15 +65,32 @@ sealed interface LyricsState {
  * Lyrics for a song, saved on this device. Sources, in order:
  * 1. lyrics embedded in the user's own local audio file (ID3 USLT/SYLT, FLAC Vorbis comment, MP4 ©lyr),
  * 2. an .lrc/.txt file the user picks with the system file picker, or text the user pastes,
- * 3. LRCLIB, the open community lyrics database (when "Online lyrics" is on): fetched once and saved.
+ * 3. LRCLIB, the open community lyrics database (when "Online lyrics" is on): fetched once and saved,
+ * 4. Arnav AI (Gemini) transcription, see [AiLyrics] (source [SOURCE_AI]).
+ *
+ * Plain (unsynced) lyrics are shown "Auto-timed" unless the user turned that off for the song:
+ * [LyricAligner] estimates line timing from the song length and, for analysed on-device songs, the
+ * vocal-activity curve ([VocalActivityStore]) and the intro/outro from [features].
  */
 class LyricsRepository(
     private val context: Context,
     private val dao: LyricsDao,
     private val online: LrclibClient? = null,
     private val onlineEnabled: () -> Boolean = { false },
+    private val features: AudioFeaturesDao? = null,
 ) {
     private val misses = context.getSharedPreferences("lyrics_online_misses", Context.MODE_PRIVATE)
+    private val timingPrefs = context.getSharedPreferences("lyrics_auto_timing", Context.MODE_PRIVATE)
+    private val vocals = VocalActivityStore(context)
+    private val _autoTimingOff = MutableStateFlow(timingPrefs.getStringSet(KEY_AUTO_TIMING_OFF, emptySet())?.toSet().orEmpty())
+
+    /** Songs (track ids) whose plain lyrics the user wants shown without estimated timing. */
+    val autoTimingOff: StateFlow<Set<String>> = _autoTimingOff.asStateFlow()
+
+    /** Last auto-timing result per song, so repeated emissions don't re-run the aligner. */
+    private val alignCache = object : LinkedHashMap<String, List<LyricLine>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<LyricLine>>?): Boolean = size > 8
+    }
     /** Songs being looked up right now, so the player and the mini player don't both ask. */
     private val inflight: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
@@ -77,7 +105,11 @@ class LyricsRepository(
             scanEmbedded(track)
         }
         if (saved == null) fetchOnlineIfNeeded(track)
-        emitAll(dao.observe(id).map { toState(it, track) })
+        emitAll(
+            combine(dao.observe(id), autoTimingOff) { row, off -> row to (id !in off) }
+                .distinctUntilChanged()
+                .map { (row, autoTime) -> toState(row, track, autoTime) },
+        )
     }
         .catch { emit(LyricsState.None) }
         .distinctUntilChanged()
@@ -252,10 +284,76 @@ class LyricsRepository(
         }
     }
 
-    private fun toState(entity: LyricsEntity?, track: Track): LyricsState {
+    private suspend fun toState(entity: LyricsEntity?, track: Track, autoTime: Boolean): LyricsState {
         if (entity == null || entity.text.isBlank()) return LyricsState.None
         val parsed = LrcParser.parse(entity.text, track.durationMs) ?: return LyricsState.None
+        if (parsed is Lyrics.Plain && autoTime) {
+            val timed = autoTimed(track, entity.text, parsed)
+            if (timed != null) return LyricsState.Ready(Lyrics.Synced(timed), entity.source, entity.text, autoTimed = true)
+        }
         return LyricsState.Ready(parsed, entity.source, entity.text)
+    }
+
+    /** Estimated timing for plain lyrics; null when the song length is unknown or too short. */
+    private suspend fun autoTimed(track: Track, text: String, plain: Lyrics.Plain): List<LyricLine>? {
+        val duration = track.durationMs?.takeIf { it >= MIN_AUTO_TIMING_MS } ?: return null
+        val key = "${track.id.value}|$duration|${text.hashCode()}"
+        synchronized(alignCache) { alignCache[key] }?.let { return it }
+        val lines = withContext(Dispatchers.IO) {
+            val id = track.id.value
+            val activity = if (track.source == SourceType.LOCAL) vocals.read(id) else null
+            val row = if (track.source == SourceType.LOCAL) {
+                try { features?.get(id) } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
+            } else null
+            val ok = row?.takeIf { it.ok }
+            withContext(Dispatchers.Default) {
+                LyricAligner.align(
+                    lines = plain.lines,
+                    durationMs = duration,
+                    activity = activity?.values,
+                    stepMs = activity?.stepMs ?: LyricAligner.DEFAULT_STEP_MS,
+                    introMs = ok?.introMs ?: 0L,
+                    outroMs = ok?.outroMs ?: 0L,
+                )
+            }
+        }.takeIf { it.isNotEmpty() } ?: return null
+        synchronized(alignCache) { alignCache[key] = lines }
+        return lines
+    }
+
+    /** Turns estimated timing of plain lyrics on or off for [track] ("Turn off auto-timing"). */
+    fun setAutoTiming(track: Track, enabled: Boolean) {
+        val id = track.id.value
+        val next = if (enabled) _autoTimingOff.value - id else _autoTimingOff.value + id
+        _autoTimingOff.value = next
+        timingPrefs.edit().putStringSet(KEY_AUTO_TIMING_OFF, next).apply()
+    }
+
+    /**
+     * "Save timing" after Adjust timing: stores [lrc] as synced lyrics. The source stays what it was
+     * (lyrics from LRCLIB stay "From LRCLIB", Arnav AI lyrics stay labelled as AI).
+     */
+    suspend fun saveTiming(track: Track, lrc: String): Boolean {
+        val existing = try { dao.get(track.id.value) } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
+        val source = existing?.source?.takeIf { it != SOURCE_REMOVED } ?: SOURCE_PASTED
+        return save(track, lrc, source)
+    }
+
+    /** True when the user removed this song's lyrics (nothing should bring them back by itself). */
+    suspend fun isRemoved(track: Track): Boolean =
+        try { dao.get(track.id.value)?.source == SOURCE_REMOVED } catch (e: CancellationException) { throw e } catch (e: Exception) { false }
+
+    /**
+     * Saves lyrics transcribed by Arnav AI unless other lyrics arrived meanwhile (a paste, LRCLIB…).
+     * A "removed" marker is replaced only when [replaceRemoved] (the user asked for AI lyrics).
+     */
+    suspend fun saveAi(track: Track, text: String, replaceRemoved: Boolean): Boolean {
+        val existing = try { dao.get(track.id.value) } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
+        if (existing != null) {
+            val removed = existing.source == SOURCE_REMOVED || existing.text.isBlank()
+            if (!removed || !replaceRemoved) return false
+        }
+        return save(track, text, SOURCE_AI)
     }
 
     /** Blocking; call on IO. Returns lyrics text embedded in the local file, or null. */
@@ -310,6 +408,10 @@ class LyricsRepository(
         const val SOURCE_PASTED = "pasted"
         /** Fetched from LRCLIB (community lyrics) and saved on the device. */
         const val SOURCE_LRCLIB = "lrclib"
+        /** Transcribed from the song by Arnav AI (Gemini). May contain mistakes; editable like any lyrics. */
+        const val SOURCE_AI = "ai"
+        private const val KEY_AUTO_TIMING_OFF = "off"
+        private const val MIN_AUTO_TIMING_MS = 20_000L
         /** ~4 LRCLIB requests a second at most while downloading a lyrics pack. */
         private const val PACK_REQUEST_INTERVAL_MS = 250L
         private const val PACK_MAX_FAILURES_IN_ROW = 3

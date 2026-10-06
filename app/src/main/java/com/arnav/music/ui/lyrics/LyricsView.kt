@@ -53,6 +53,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.DeleteOutline
@@ -61,6 +62,8 @@ import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.SortByAlpha
+import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material.icons.rounded.TimerOff
 import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -116,12 +119,15 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.arnav.music.core.lyrics.AiLyrics
 import com.arnav.music.core.lyrics.LyricsRepository
 import com.arnav.music.core.lyrics.LyricsState
 import com.arnav.music.core.lyrics.Romanizer
 import com.arnav.music.core.playback.Progress
 import com.arnav.music.core.settings.SettingsRepository
+import com.arnav.music.domain.lyrics.LrcWriter
 import com.arnav.music.domain.lyrics.LyricLine
+import com.arnav.music.domain.lyrics.LyricRetimer
 import com.arnav.music.domain.lyrics.LyricWord
 import com.arnav.music.domain.lyrics.Lyrics
 import com.arnav.music.domain.lyrics.LyricsTiming
@@ -134,13 +140,16 @@ import com.arnav.music.ui.theme.Radius
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
+import org.koin.core.context.GlobalContext
 import kotlin.math.abs
 
 /**
- * Apple Music–style lyrics for Now Playing. Lyrics come only from the user's own file, an
- * imported .lrc/.txt, or pasted text (see [LyricsRepository]).
+ * Apple Music–style lyrics for Now Playing. Lyrics come from the user's own file, an imported
+ * .lrc/.txt, pasted text, LRCLIB or Arnav AI (see [LyricsRepository], [AiLyrics]). Plain lyrics
+ * are shown "Auto-timed" when possible, and any synced lyrics can be fine-tuned ("Adjust timing").
  *
  * Time-synced lyrics follow playback: the sung line sits ~30% from the top, lines below follow
  * the scroll in a short cascade, word-synced lines fill word by word, and instrumental breaks
@@ -263,6 +272,28 @@ private fun LyricsHost(
         }
     }
     val rescan: (() -> Unit)? = if (track.source == SourceType.LOCAL) rescanFile else null
+
+    // Arnav AI lyrics (null when not registered in this build).
+    val aiLyrics = remember { runCatching { GlobalContext.get().getOrNull<AiLyrics>() }.getOrNull() }
+    val aiStatusFlow = remember(aiLyrics) { aiLyrics?.status ?: MutableStateFlow<Map<String, AiLyrics.Status>>(emptyMap()) }
+    val aiStatus = aiStatusFlow.collectAsState().value[track.id.value]
+    val generateAi: (() -> Unit)? = if (aiLyrics != null && aiLyrics.offered && aiLyrics.supports(track)) ({
+        notice = null
+        aiLyrics.generate(track)
+    }) else null
+    // Automatic mode: no lyrics anywhere (file, LRCLIB) for the song that's playing → ask once.
+    val noLyrics = state == LyricsState.None
+    LaunchedEffect(track.id, noLyrics, live) {
+        if (noLyrics && live && aiLyrics != null) {
+            delay(AUTO_AI_DELAY_MS)
+            aiLyrics.maybeAuto(track)
+        }
+    }
+
+    // Auto-timing of plain lyrics, and "Adjust timing" (tap to sync).
+    val autoTimingOff = repo.autoTimingOff.collectAsState().value.contains(track.id.value)
+    var draft by remember(track.id) { mutableStateOf<TimingDraft?>(null) }
+    val endOfSong = maxOf(track.durationMs ?: 0L, progress.durationMs)
     var searching by remember(track.id) { mutableStateOf(false) }
     val searchOnline: (() -> Unit)? = if (repo.onlineAvailable) ({
         if (!searching) scope.launch {
@@ -302,24 +333,68 @@ private fun LyricsHost(
                     onRescan = rescan,
                     onSearchOnline = searchOnline,
                     searching = searching,
+                    onGenerateAi = generateAi,
+                    aiStatus = aiStatus,
                 )
                 is LyricsState.Ready -> {
+                    val lyrics = s.lyrics
+                    val canAdjust = lyrics is Lyrics.Synced && live
                     val menu: @Composable () -> Unit = {
                         LyricsMenu(
                             tint = muted,
-                            onEdit = { openEditor(s.raw) },
-                            onImport = openPicker,
-                            onRemove = remove,
+                            onEdit = { draft = null; openEditor(s.raw) },
+                            onImport = { draft = null; openPicker() },
+                            onRemove = { draft = null; remove() },
                             translation = appSettings.lyricsTranslation,
                             onToggleTranslation = toggleTranslation,
                             romanization = if (Romanizer.supported) appSettings.lyricsRomanization else null,
                             onToggleRomanization = toggleRomanization,
+                            onAdjustTiming = if (canAdjust && draft == null && lyrics is Lyrics.Synced) ({
+                                haptics.select()
+                                draft = TimingDraft(lyrics.lines, emptySet())
+                            }) else null,
+                            autoTiming = when {
+                                s.autoTimed -> true
+                                lyrics is Lyrics.Plain && autoTimingOff -> false
+                                else -> null
+                            },
+                            onToggleAutoTiming = {
+                                draft = null
+                                repo.setAutoTiming(track, enabled = !s.autoTimed)
+                            },
                         )
                     }
-                    val lyrics = s.lyrics
                     if (lyrics is Lyrics.Synced && live) {
+                        val editing = draft
+                        val retime: (Int, Long) -> Unit = { index, positionMs ->
+                            draft = draft?.let { d ->
+                                TimingDraft(
+                                    LyricRetimer.reanchor(d.lines, index, (positionMs - TAP_LATENCY_MS).coerceAtLeast(0L), endOfSong, d.anchors),
+                                    d.anchors + index,
+                                )
+                            }
+                        }
+                        val adjustBar: @Composable () -> Unit = {
+                            AdjustTimingBar(
+                                on = on,
+                                onEarlier = { draft = draft?.let { d -> d.copy(lines = LyricRetimer.shift(d.lines, -NUDGE_MS)) } },
+                                onLater = { draft = draft?.let { d -> d.copy(lines = LyricRetimer.shift(d.lines, NUDGE_MS)) } },
+                                onCancel = { draft = null },
+                                onSave = {
+                                    val d = draft
+                                    if (d != null) scope.launch {
+                                        val ok = repo.saveTiming(track, LrcWriter.write(d.lines))
+                                        if (ok) {
+                                            haptics.select()
+                                            draft = null
+                                            notice = null
+                                        } else notice = "Couldn't save the timing."
+                                    }
+                                },
+                            )
+                        }
                         SyncedLyrics(
-                            lines = lyrics.lines,
+                            lines = editing?.lines ?: lyrics.lines,
                             progress = progress,
                             isPlaying = isPlaying,
                             onSeek = onSeek,
@@ -332,9 +407,18 @@ private fun LyricsHost(
                             beat = beat,
                             extras = extras,
                             header = header,
+                            caption = when {
+                                editing != null -> notice ?: "Tap each line the moment it starts"
+                                s.autoTimed -> "Auto-timed · ${sourceLabel(s.source)}"
+                                s.source == LyricsRepository.SOURCE_AI -> sourceLabel(s.source)
+                                else -> null
+                            },
+                            onLineTap = if (editing == null) null else retime,
+                            bottomBar = if (editing == null) null else adjustBar,
                         )
                     } else {
                         val caption = when {
+                            s.autoTimed -> "Auto-timed · ${sourceLabel(s.source)}"
                             lyrics is Lyrics.Plain -> "Not time-synced · ${sourceLabel(s.source)}"
                             else -> "Time-synced · ${sourceLabel(s.source)}"
                         }
@@ -383,8 +467,18 @@ private fun sourceLabel(source: String): String = when (source) {
     LyricsRepository.SOURCE_FILE -> "Imported by you"
     LyricsRepository.SOURCE_PASTED -> "Added by you"
     LyricsRepository.SOURCE_LRCLIB -> "From LRCLIB · community lyrics"
+    LyricsRepository.SOURCE_AI -> "Transcribed by Arnav AI · may contain mistakes"
     else -> "Saved on this device"
 }
+
+/** "Adjust timing" in progress: the retimed lines and the lines already tapped (fixed anchors). */
+private data class TimingDraft(val lines: List<LyricLine>, val anchors: Set<Int>)
+
+/** People tap a little after they hear a line start. */
+private const val TAP_LATENCY_MS = 120L
+private const val NUDGE_MS = 500L
+/** Let LRCLIB's "nothing found" settle (and quick skips pass) before asking Arnav AI. */
+private const val AUTO_AI_DELAY_MS = 2_500L
 
 // endregion
 
@@ -512,6 +606,11 @@ private fun SyncedLyrics(
     beat: () -> Float = { 0f },
     extras: LyricsExtrasState? = null,
     header: @Composable () -> Unit = {},
+    /** Small caption above the lines, e.g. "Auto-timed · From LRCLIB". */
+    caption: String? = null,
+    /** "Adjust timing": a tap re-anchors the line at the current position instead of seeking. */
+    onLineTap: ((index: Int, positionMs: Long) -> Unit)? = null,
+    bottomBar: (@Composable () -> Unit)? = null,
 ) {
     val motion = ArnavTheme.motion
     val haptics = ArnavTheme.haptics
@@ -532,7 +631,8 @@ private fun SyncedLyrics(
     )
     val followSpec = motion.responsive<Float>()
 
-    val clock = remember(lines) { LyricClock(progress.positionMs) }
+    // Keyed on the line count only: retiming ("Adjust timing") must not reset the playback clock.
+    val clock = remember(lines.size) { LyricClock(progress.positionMs) }
     LaunchedEffect(clock, progress, isPlaying) {
         clock.sync(progress.positionMs, progress.durationMs, isPlaying, System.nanoTime())
         if (isPlaying) {
@@ -626,9 +726,13 @@ private fun SyncedLyrics(
                 val distance = if (current < 0) index + 1 else abs(index - current)
                 val onTap: () -> Unit = {
                     haptics.select()
-                    clock.seek(line.startMs, System.nanoTime())
-                    browsing = false
-                    onSeek(line.startMs)
+                    if (onLineTap != null) {
+                        onLineTap(index, clock.positionMs)
+                    } else {
+                        clock.seek(line.startMs, System.nanoTime())
+                        browsing = false
+                        onSeek(line.startMs)
+                    }
                 }
                 if (line.isInstrumental) {
                     InstrumentalRow(line, index, isActive, clock, cascade, on, reduced, onTap)
@@ -655,8 +759,18 @@ private fun SyncedLyrics(
             }
         }
 
-        Box(Modifier.align(Alignment.TopStart).padding(top = padTop + 6.dp, start = start + 22.dp, end = end + 52.dp)) { header() }
+        Box(Modifier.align(Alignment.TopStart).padding(top = padTop + 6.dp, start = start + 22.dp, end = end + 52.dp)) {
+            Column {
+                if (caption != null) {
+                    Text(caption, style = ArnavTheme.type.caption, color = muted, maxLines = 1, modifier = Modifier.padding(top = 6.dp, bottom = 4.dp))
+                }
+                header()
+            }
+        }
         Box(Modifier.align(Alignment.TopEnd).padding(top = padTop, end = end + 4.dp)) { menu() }
+        if (bottomBar != null) {
+            Box(Modifier.align(Alignment.BottomCenter).padding(bottom = padBottom + 12.dp, start = start + 16.dp, end = end + 16.dp)) { bottomBar() }
+        }
     }
 }
 
@@ -1025,8 +1139,15 @@ private fun NoLyrics(
     onRescan: (() -> Unit)?,
     onSearchOnline: (() -> Unit)? = null,
     searching: Boolean = false,
+    onGenerateAi: (() -> Unit)? = null,
+    aiStatus: AiLyrics.Status? = null,
 ) {
     val local = track.source == SourceType.LOCAL
+    if (aiStatus == AiLyrics.Status.Working) {
+        AiListening(on, muted, accent, contentPadding)
+        return
+    }
+    val aiFailure = (aiStatus as? AiLyrics.Status.Failed)?.message
     Box(Modifier.fillMaxSize().padding(contentPadding), contentAlignment = Alignment.Center) {
         Column(
             Modifier
@@ -1061,8 +1182,12 @@ private fun NoLyrics(
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(22.dp))
+            if (onGenerateAi != null) {
+                PanelButton("Generate with Arnav AI", Icons.Rounded.AutoAwesome, onGenerateAi, filled = true, on = on)
+                Spacer(Modifier.height(10.dp))
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                PanelButton("Import .lrc file", Icons.Rounded.Description, onImport, filled = true, on = on)
+                PanelButton("Import .lrc file", Icons.Rounded.Description, onImport, filled = onGenerateAi == null, on = on)
                 PanelButton("Paste lyrics", Icons.Rounded.ContentPaste, onPaste, filled = false, on = on)
             }
             if (onSearchOnline != null) {
@@ -1077,18 +1202,105 @@ private fun NoLyrics(
                     Text("Look in the song file again", style = ArnavTheme.type.label, color = muted)
                 }
             }
-            if (notice != null) {
+            if (notice != null || aiFailure != null) {
                 Spacer(Modifier.height(6.dp))
-                Text(notice, style = ArnavTheme.type.caption, color = on, textAlign = TextAlign.Center)
+                Text(notice ?: aiFailure.orEmpty(), style = ArnavTheme.type.caption, color = on, textAlign = TextAlign.Center)
             }
             Spacer(Modifier.height(18.dp))
             Text(
-                if (onSearchOnline != null) "Online lyrics come from LRCLIB, an open community database." else "Lyrics stay on this device.",
+                when {
+                    onGenerateAi != null && local -> "Arnav AI sends the song's audio to Google's Gemini to write lyrics. They may contain mistakes."
+                    onGenerateAi != null -> "Arnav AI asks Google's Gemini to listen to this YouTube video and write lyrics. They may contain mistakes."
+                    onSearchOnline != null -> "Online lyrics come from LRCLIB, an open community database."
+                    else -> "Lyrics stay on this device."
+                },
                 style = ArnavTheme.type.caption,
                 color = muted.copy(alpha = muted.alpha * 0.8f),
                 textAlign = TextAlign.Center,
             )
         }
+    }
+}
+
+/** Calm progress state while Arnav AI transcribes the song. */
+@Composable
+private fun AiListening(on: Color, muted: Color, accent: Color, contentPadding: PaddingValues) {
+    val reduced = ArnavTheme.motion.reduced
+    val transition = rememberInfiniteTransition(label = "aiListening")
+    val pulse = transition.animateFloat(
+        initialValue = 0.92f,
+        targetValue = 1.06f,
+        animationSpec = infiniteRepeatable(tween(1_400, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "aiPulse",
+    )
+    Box(
+        Modifier
+            .fillMaxSize()
+            .padding(contentPadding)
+            .semantics { stateDescription = "Arnav AI is writing the lyrics" },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(Modifier.padding(horizontal = 36.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                Modifier
+                    .size(64.dp)
+                    .graphicsLayer {
+                        val k = if (reduced) 1f else pulse.value
+                        scaleX = k
+                        scaleY = k
+                    }
+                    .clip(CircleShape)
+                    .background(accent.copy(alpha = 0.2f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.AutoAwesome, null, tint = on, modifier = Modifier.size(26.dp))
+            }
+            Spacer(Modifier.height(18.dp))
+            Text(
+                "Arnav AI is writing the lyrics",
+                style = ArnavTheme.type.headline.copy(fontSize = 19.sp, lineHeight = 25.sp),
+                color = on,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(AiLyrics.PROGRESS_MESSAGE, style = ArnavTheme.type.bodySmall, color = muted, textAlign = TextAlign.Center)
+        }
+    }
+}
+
+/** "Adjust timing" controls: nudge everything by half a second, cancel, or save as synced lyrics. */
+@Composable
+private fun AdjustTimingBar(on: Color, onEarlier: () -> Unit, onLater: () -> Unit, onCancel: () -> Unit, onSave: () -> Unit) {
+    val haptics = ArnavTheme.haptics
+    Row(
+        Modifier
+            .clip(CircleShape)
+            .background(on.copy(alpha = 0.14f))
+            .padding(horizontal = 6.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        BarChip("−0.5 s", "Lyrics half a second earlier", on, filled = false) { haptics.select(); onEarlier() }
+        BarChip("+0.5 s", "Lyrics half a second later", on, filled = false) { haptics.select(); onLater() }
+        BarChip("Cancel", null, on, filled = false, onClick = onCancel)
+        BarChip("Save timing", null, on, filled = true, onClick = onSave)
+    }
+}
+
+@Composable
+private fun BarChip(text: String, description: String?, on: Color, filled: Boolean, onClick: () -> Unit) {
+    val fg = if (filled) (if (on.luminance() > 0.5f) Color(0xFF111116) else Color.White) else on
+    Box(
+        Modifier
+            .heightIn(min = 40.dp)
+            .clip(CircleShape)
+            .background(if (filled) on else Color.Transparent)
+            .clickable(role = Role.Button, onClick = onClick)
+            .then(if (description != null) Modifier.semantics { contentDescription = description } else Modifier)
+            .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, style = ArnavTheme.type.label, color = fg, maxLines = 1)
     }
 }
 
@@ -1121,6 +1333,10 @@ private fun LyricsMenu(
     onToggleTranslation: () -> Unit = {},
     romanization: Boolean? = null,
     onToggleRomanization: () -> Unit = {},
+    onAdjustTiming: (() -> Unit)? = null,
+    /** true: auto-timed now ("Turn off auto-timing"); false: off for this song ("Auto-time lyrics"); null: hidden. */
+    autoTiming: Boolean? = null,
+    onToggleAutoTiming: () -> Unit = {},
 ) {
     var open by remember { mutableStateOf(false) }
     Box {
@@ -1143,6 +1359,20 @@ private fun LyricsMenu(
                     leadingIcon = { Icon(Icons.Rounded.SortByAlpha, null) },
                     trailingIcon = { if (romanization) Icon(Icons.Rounded.Check, "On") },
                     modifier = Modifier.semantics { stateDescription = if (romanization) "On" else "Off" },
+                )
+            }
+            if (onAdjustTiming != null) {
+                DropdownMenuItem(
+                    text = { Text("Adjust timing") },
+                    onClick = { open = false; onAdjustTiming() },
+                    leadingIcon = { Icon(Icons.Rounded.Timer, null) },
+                )
+            }
+            if (autoTiming != null) {
+                DropdownMenuItem(
+                    text = { Text(if (autoTiming) "Turn off auto-timing" else "Auto-time lyrics") },
+                    onClick = { open = false; onToggleAutoTiming() },
+                    leadingIcon = { Icon(if (autoTiming) Icons.Rounded.TimerOff else Icons.Rounded.Timer, null) },
                 )
             }
             DropdownMenuItem(
