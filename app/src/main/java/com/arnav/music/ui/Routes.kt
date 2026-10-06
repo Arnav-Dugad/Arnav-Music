@@ -62,6 +62,7 @@ sealed interface DeepLink {
                 "settings" -> Navigate(Routes.settings(seg))
                 "moment" -> seg?.takeIf { com.arnav.music.domain.model.Moments.byId(it) != null }?.let { Navigate(Routes.moment(it)) }
                 "insights" -> Navigate(Routes.INSIGHTS)
+                "smart" -> seg?.takeIf { s -> com.arnav.music.domain.intelligence.SmartPlaylist.entries.any { it.name == s } }?.let { Navigate(Routes.collection(CollectionKind.SMART, it)) }
                 else -> null
             }
         }

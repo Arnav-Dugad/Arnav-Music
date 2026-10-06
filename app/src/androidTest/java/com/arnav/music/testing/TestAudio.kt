@@ -69,7 +69,7 @@ object WavWriter {
  * deletes it afterwards. [title] is read back from MediaStore after the media scan, exactly as the
  * app will show it.
  */
-class TestAudioRule(private val seconds: Int = 24) : ExternalResource() {
+class TestAudioRule(private val seconds: Int = 45) : ExternalResource() {
     lateinit var title: String
         private set
     var uri: Uri? = null

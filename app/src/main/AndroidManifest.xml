@@ -70,6 +70,9 @@
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
+                <!-- Android Auto / Automotive / media browsers: on-device music only. -->
+                <action android:name="androidx.media3.session.MediaLibraryService" />
+                <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
 
@@ -112,6 +115,16 @@
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/arnav_recap_widget_info" />
         </receiver>
 
+        <receiver
+            android:name=".widget.LyricsWidgetReceiver"
+            android:exported="true"
+            android:label="Arnav Music · Lyrics">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/arnav_lyrics_widget_info" />
+        </receiver>
+
         <!-- Quick Settings tile: toggles on-device playback; opens the app for YouTube. -->
         <service
             android:name=".core.system.PlaybackTileService"
@@ -132,6 +145,10 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/share_paths" />
         </provider>
+
+        <!-- Android Auto: media app (browse + play the user's on-device music). -->
+        <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc" />
+        <meta-data android:name="com.google.android.gms.car.notification.SmallIcon" android:resource="@drawable/ic_stat_arnav" />
 
         <!-- Analytics stays off until the user opts in (Settings → Privacy). -->
         <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />

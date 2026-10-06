@@ -14,8 +14,6 @@ import androidx.compose.ui.test.isOff
 import androidx.compose.ui.test.isOn
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.arnav.music.testing.CrashLoggerRule
 import com.arnav.music.testing.M
@@ -24,7 +22,7 @@ import com.arnav.music.testing.click
 import com.arnav.music.testing.device
 import com.arnav.music.testing.exists
 import com.arnav.music.testing.grantAppPermissions
-import com.arnav.music.testing.label
+import com.arnav.music.testing.spokenText
 import com.arnav.music.testing.nodes
 import com.arnav.music.testing.skipOnboardingIfShown
 import com.arnav.music.testing.targetPackage
@@ -97,12 +95,12 @@ class SettingsTest {
             val toggles = rule.nodes(isToggleable() and isEnabled() and hasClickAction())
             val target = toggles.firstOrNull()
             if (target != null) {
-                val name = target.label()
+                val name = target.spokenText()
                 val wasOn = target.config.getOrNull(SemanticsProperties.ToggleableState) == ToggleableState.On
                 val byName = isToggleable() and hasText(target.config[SemanticsProperties.Text].first().text)
-                rule.onNode(byName).performScrollTo().performClick()
+                rule.click(byName)
                 rule.waitFor(byName and (if (wasOn) isOff() else isOn()))
-                rule.onNode(byName).performClick()
+                rule.click(byName)
                 rule.waitFor(byName and (if (wasOn) isOn() else isOff()))
                 flipped++
                 Log.i(TAG, "Flipped '$name' on '$row' and back")

@@ -1,5 +1,6 @@
 package com.arnav.music.feature.collection
 
+import androidx.compose.material.icons.rounded.AddToHomeScreen
 import com.arnav.music.ui.theme.AccentScope
 import com.arnav.music.ui.sharedArt
 import com.arnav.music.ui.ArtKeys
@@ -116,11 +117,17 @@ fun CollectionScreen(kind: CollectionKind, id: String, vm: CollectionViewModel =
     // "Shuffle liked" deep action from the command palette.
     LaunchedEffect(ui.tracks.isNotEmpty()) { if (id == "shuffle" && ui.tracks.isNotEmpty()) app.play(ui.tracks, 0, shuffle = true) }
 
+    // Recently opened playlists become launcher shortcuts; any playlist can be pinned to the home screen.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(ui.loading, ui.title) { if (!ui.loading) vm.rememberOpened(context) }
     CollectionScaffold(
         sharedKey = ArtKeys.collection(kind, id),
         title = ui.title, subtitle = ui.subtitle, kindLabel = ui.kindLabel, description = ui.description, tracks = visible, allTracks = ui.tracks,
         loading = ui.loading, youtube = ui.youtube,
         actions = {
+            if (vm.canPinShortcut && com.arnav.music.core.system.Shortcuts.canPin(context)) {
+                ArnavIconButton(Icons.Rounded.AddToHomeScreen, "Add to home screen", { vm.pinShortcut(context) { msg -> msg?.let { app.message(it) } } }, tint = c.contentMuted)
+            }
             if (ui.youtubeImport) {
                 if (refreshing) {
                     Box(Modifier.size(Space.touch), contentAlignment = Alignment.Center) {

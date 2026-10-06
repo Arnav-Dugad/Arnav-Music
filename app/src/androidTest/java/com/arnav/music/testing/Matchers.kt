@@ -70,7 +70,7 @@ object M {
 }
 
 /** Everything a person could read or hear for this node: texts, descriptions, click label, field text. */
-fun SemanticsNode.label(): String {
+fun SemanticsNode.spokenText(): String {
     val parts = ArrayList<String>()
     config.getOrNull(SemanticsProperties.Text)?.forEach { parts += it.text }
     config.getOrNull(SemanticsProperties.ContentDescription)?.let { parts += it }

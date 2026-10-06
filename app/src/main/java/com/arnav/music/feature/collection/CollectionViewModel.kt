@@ -1,13 +1,16 @@
 package com.arnav.music.feature.collection
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.arnav.music.R
 import com.arnav.music.core.common.Clock
 import com.arnav.music.core.db.PendingMatchEntity
 import com.arnav.music.core.importer.ImportMatcher
 import com.arnav.music.core.importer.MatchNowResult
 import com.arnav.music.core.repo.IntelligenceRepository
 import com.arnav.music.core.repo.LibraryRepository
+import com.arnav.music.core.system.Shortcuts
 import com.arnav.music.core.youtube.YouTubeImporter
 import com.arnav.music.core.youtube.YouTubeRepository
 import com.arnav.music.domain.intelligence.SmartPlaylist
@@ -24,6 +27,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -156,6 +160,53 @@ class CollectionViewModel(
         _ui.update { it.copy(savedToLibrary = true) }
     }
     fun duplicateAsArnav() = viewModelScope.launch { library.createPlaylist(_ui.value.title, tracks = _ui.value.tracks) }
+
+    // ---- Home-screen shortcuts ----
+
+    /** Whether this collection can get a home-screen shortcut (Arnav and smart playlists). */
+    val canPinShortcut: Boolean get() = kind == CollectionKind.PLAYLIST || kind == CollectionKind.SMART
+
+    /**
+     * Asks the launcher to pin a shortcut to this playlist. [onResult] gets null when the system's
+     * pin confirmation was shown, or a message to show when pinning isn't possible.
+     */
+    fun pinShortcut(context: Context, onResult: (String?) -> Unit = {}) {
+        val u = _ui.value
+        if (u.loading || u.error != null || !canPinShortcut) return
+        val app = context.applicationContext
+        viewModelScope.launch {
+            val ok = shortcutTarget(u)?.let { (smart, targetId, art) ->
+                if (smart) Shortcuts.pinSmart(app, targetId, u.title, art) else Shortcuts.pinPlaylist(app, targetId, u.title, art)
+            } ?: false
+            onResult(if (ok) null else app.getString(R.string.shortcut_pin_unsupported))
+        }
+    }
+
+    /** Records this playlist as recently opened (long-press app-icon shortcuts). Call once it has loaded. */
+    fun rememberOpened(context: Context) {
+        val u = _ui.value
+        if (u.loading || u.error != null || u.title.isBlank() || !canPinShortcut) return
+        val app = context.applicationContext
+        viewModelScope.launch {
+            shortcutTarget(u)?.let { (smart, targetId, art) -> Shortcuts.reportOpened(app, targetId, u.title, art, smart) }
+        }
+    }
+
+    /** (smart, id, artwork) for the current collection, or null when it can't have a shortcut. */
+    private suspend fun shortcutTarget(u: CollectionUi): Triple<Boolean, String, String?>? {
+        val firstArt = u.tracks.firstNotNullOfOrNull { it.artworkUrl }
+        return when (kind) {
+            CollectionKind.PLAYLIST -> {
+                val art = runCatching { library.playlist(id).first()?.artworkUrl }.getOrNull() ?: firstArt
+                Triple(false, id, art)
+            }
+            CollectionKind.SMART -> {
+                val smartKind = runCatching { SmartPlaylist.valueOf(id) }.getOrDefault(SmartPlaylist.HEAVY_ROTATION).name
+                Triple(true, smartKind, firstArt)
+            }
+            else -> null
+        }
+    }
 
     // ---- Imported playlists ----
 

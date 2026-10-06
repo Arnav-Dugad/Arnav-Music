@@ -914,6 +914,8 @@ private fun MetaAndControls(
 ) {
     TitleRow(track, liked, on, muted, actions)
     Spacer(Modifier.height(Space.l))
+    // Long mixes and audiobook-style files: jump between their chapters (draws nothing otherwise).
+    com.arnav.music.core.chapters.ChapterStrip(track, progress, actions.seekTo, Modifier.padding(bottom = Space.m))
     Transport(track, state, progress, on, muted, accent, actions, onQueue, onLyrics, lyricsOpen)
 }
 

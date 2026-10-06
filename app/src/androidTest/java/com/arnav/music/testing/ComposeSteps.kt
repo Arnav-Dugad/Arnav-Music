@@ -9,6 +9,8 @@ import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.UiDevice
@@ -35,7 +37,7 @@ fun ComposeTestRule.isShown(matcher: SemanticsMatcher): Boolean =
 /** One line of what's on screen right now, for failure messages readable from plain CI logs. */
 fun ComposeTestRule.screenSummary(max: Int = 1_800): String = runCatching {
     val roots = onAllNodes(isRoot()).fetchSemanticsNodes(atLeastOneRootRequired = false).size
-    val labels = nodes(SemanticsMatcher("any node") { true }).map { it.label() }.filter { it.isNotBlank() }.distinct()
+    val labels = nodes(SemanticsMatcher("any node") { true }).map { it.spokenText() }.filter { it.isNotBlank() }.distinct()
     "[$roots root(s)] " + labels.joinToString(" · ").take(max)
 }.getOrElse { "<screen unavailable: ${it.javaClass.simpleName}: ${it.message?.take(300)}>" }
 
@@ -74,12 +76,25 @@ fun ComposeTestRule.waitForAny(vararg matchers: SemanticsMatcher, timeout: Long 
     return found!!
 }
 
-/** Scrolls the node into view when it sits in a scrollable container, then clicks it. */
+/**
+ * Scrolls the node into view when it sits in a scrollable container, then activates its click
+ * action the way TalkBack / Switch Access do. That never misses because of the floating bottom bar
+ * or MorphBar covering a row near the bottom edge (a raw touch there would hit the bar instead).
+ * Use [tap] when the touch path itself matters.
+ */
 fun ComposeTestRule.click(matcher: SemanticsMatcher, timeout: Long = TIMEOUT) {
     val node = waitFor(matcher, timeout)
     runCatching { node.performScrollTo() }
-    val r = runCatching { onAllNodes(matcher).onFirst().performClick() }
+    val r = runCatching { onAllNodes(matcher).onFirst().performSemanticsAction(SemanticsActions.OnClick) }
     r.exceptionOrNull()?.let { fail("Could not click [${matcher.description}]", it) }
+    waitForIdle()
+}
+
+/** A real touch in the middle of the node (goes through hit-testing like a finger). */
+fun ComposeTestRule.tap(matcher: SemanticsMatcher, timeout: Long = TIMEOUT) {
+    waitFor(matcher, timeout)
+    val r = runCatching { onAllNodes(matcher).onFirst().performClick() }
+    r.exceptionOrNull()?.let { fail("Could not tap [${matcher.description}]", it) }
     waitForIdle()
 }
 

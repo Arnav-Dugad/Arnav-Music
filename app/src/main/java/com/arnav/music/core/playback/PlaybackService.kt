@@ -2,11 +2,13 @@ package com.arnav.music.core.playback
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.util.UnstableApi
@@ -14,6 +16,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CommandButton
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
+import androidx.media3.session.MediaLibraryService.LibraryParams
+import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionError
@@ -116,8 +120,8 @@ class PlaybackService : MediaLibraryService() {
         // Chapters of the current (always on-device) item, read from the file itself.
         val currentChapters = currentMediaId.flatMapLatest { id ->
             val item = player.currentMediaItem
-            val track = if (id != null && item?.mediaId == id) item.toTrack(id) else null
-            if (track == null || track.source != SourceType.LOCAL) flowOf(id to emptyList())
+            val track = if (id != null && item != null && item.mediaId == id) item.toTrack(id) else null
+            if (track == null || track.source != SourceType.LOCAL) flowOf(id to emptyList<Chapter>())
             else chapterRepo.observe(track).map { id to it }
         }
 
@@ -248,6 +252,10 @@ class PlaybackService : MediaLibraryService() {
             if (isOwnPlayableRequest(controller, mediaItems)) return super.onAddMediaItems(mediaSession, controller, mediaItems)
             return future {
                 val resolved = autoLibrary.resolve(mediaItems, 0) ?: throw UnsupportedOperationException("Nothing on this device matches")
+                // Never mix a car/remote request into a queue that holds YouTube items: those may only
+                // play in the visible app, and the queue would advance into them from the car.
+                val queueHasYouTube = runCatching { playback.state.value.queue.items.any { it.track.source == SourceType.YOUTUBE } }.getOrDefault(true)
+                if (queueHasYouTube) throw UnsupportedOperationException("The current queue has YouTube items")
                 if (handOff { playback.addToQueue(resolved.tracks) }) throw HandledByAppQueue()
                 resolved.tracks.map { it.toPlayableItem() }.toMutableList()
             }
@@ -293,13 +301,13 @@ class PlaybackService : MediaLibraryService() {
 
     private fun Track.toPlayableItem(): MediaItem = MediaItem.Builder()
         .setMediaId(id.value)
-        .setUri(android.net.Uri.parse(playbackRef))
+        .setUri(Uri.parse(playbackRef))
         .setMediaMetadata(
-            androidx.media3.common.MediaMetadata.Builder()
+            MediaMetadata.Builder()
                 .setTitle(title)
                 .setArtist(artist)
                 .setAlbumTitle(album)
-                .setArtworkUri(artworkUrl?.let(android.net.Uri::parse))
+                .setArtworkUri(artworkUrl?.let(Uri::parse))
                 .build(),
         )
         .build()

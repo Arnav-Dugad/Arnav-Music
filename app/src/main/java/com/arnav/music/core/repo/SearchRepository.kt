@@ -52,7 +52,8 @@ class SearchRepository(
 
     suspend fun localMatches(query: String): List<Track> {
         if (query.isBlank()) return emptyList()
-        val known = (library.searchKnown(query.trim()) + library.localTracks.value)
+        // Snapshot, not the cached flow: on-device songs must match even when no screen observes them.
+        val known = (library.searchKnown(query.trim()) + library.localTracksSnapshot())
         return known.asSequence()
             .map { it to maxOf(QueryNormalizer.matchScore(query, it.title), QueryNormalizer.matchScore(query, it.artist) * 0.95f) }
             .filter { it.second >= 0.5f }

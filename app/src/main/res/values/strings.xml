@@ -6,4 +6,6 @@
     <string name="recap_widget_description">Your week in music: minutes, top artist and top song</string>
     <string name="tile_label">Arnav Music</string>
     <string name="tile_nothing_playing">Nothing playing</string>
+    <string name="lyrics_widget_description">The line being sung right now, and the next one</string>
+    <string name="shortcut_pin_unsupported">Your home screen doesn\'t support pinned shortcuts</string>
 </resources>
