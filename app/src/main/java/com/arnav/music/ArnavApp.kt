@@ -81,6 +81,7 @@ class ArnavApp : Application(), SingletonImageLoader.Factory {
                     if (on && updates.isDue()) updates.check()
                 }
             }
+            launch { com.arnav.music.core.importer.MatchWorker.ensureScheduled(this@ArnavApp, get()) }
             get<RemoteConfigRepository>().refresh()
             get<CloudSync>().schedulePeriodic()
         }

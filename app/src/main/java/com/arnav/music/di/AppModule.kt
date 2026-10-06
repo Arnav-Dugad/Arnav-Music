@@ -103,6 +103,8 @@ val appModule = module {
     single { com.arnav.music.core.youtube.UploadResolver(get()) }
     single { com.arnav.music.core.youtube.YouTubeImporter(get(), get(), get()) }
     single { com.arnav.music.core.lyrics.LyricsRepository(androidContext(), get<ArnavDatabase>().lyrics()) }
+    single { com.arnav.music.core.importer.FileImporter(androidContext()) }
+    single { com.arnav.music.core.importer.ImportMatcher(androidContext(), get(), get(), get(), get()) }
     single { PlaybackController(androidContext(), get(), get(), get(), get(), get(), get()) }
 
     viewModel { AppViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
@@ -114,7 +116,8 @@ val appModule = module {
     viewModel { ArnavAiViewModel(get(), get(), get(), get()) }
     viewModel { InsightsViewModel(get(), get()) }
     viewModel { SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
-    viewModel { CollectionViewModel(get(), get(), get(), get()) }
+    viewModel { CollectionViewModel(get(), get(), get(), get(), get(), get()) }
+    viewModel { com.arnav.music.feature.library.PlaylistImportViewModel(androidContext(), get(), get(), get(), get(), get()) }
     viewModel { com.arnav.music.feature.moments.MomentViewModel(get(), get()) }
 }
 

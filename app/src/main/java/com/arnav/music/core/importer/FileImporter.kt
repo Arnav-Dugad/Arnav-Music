@@ -80,7 +80,15 @@ class FileImporter(private val context: Context) {
         return ParsedImport(if (sawJson) ImportSource.SPOTIFY else ImportSource.CSV, playlists.take(MAX_PLAYLISTS))
     }
 
-    private fun decode(bytes: ByteArray): String = String(bytes, Charsets.UTF_8).removePrefix("\uFEFF")
+    /** UTF-8 (with or without BOM); UTF-16 when the file starts with a UTF-16 byte-order mark (Excel "Unicode text"). */
+    private fun decode(bytes: ByteArray): String {
+        val charset = when {
+            bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xFE.toByte() -> Charsets.UTF_16LE
+            bytes.size >= 2 && bytes[0] == 0xFE.toByte() && bytes[1] == 0xFF.toByte() -> Charsets.UTF_16BE
+            else -> Charsets.UTF_8
+        }
+        return String(bytes, charset).removePrefix("\uFEFF")
+    }
 
     /** Reads at most [limit] bytes; throws when the stream holds more. */
     private fun readLimited(input: InputStream, limit: Long): ByteArray {
@@ -104,7 +112,7 @@ class FileImporter(private val context: Context) {
         const val TOO_LARGE = "This file is larger than 20 MB. Export a single playlist, or pick the Playlist1.json file from your Spotify export."
 
         /** MIME types offered in the system picker. Some providers label CSV as text/plain or octet-stream. */
-        val SPOTIFY_TYPES = arrayOf("application/zip", "application/x-zip-compressed", "application/json", "text/plain", "application/octet-stream")
-        val CSV_TYPES = arrayOf("text/csv", "text/comma-separated-values", "text/plain", "text/tab-separated-values", "application/vnd.ms-excel", "application/octet-stream")
+        val SPOTIFY_TYPES = arrayOf("application/zip", "application/x-zip-compressed", "application/json", "text/*", "application/octet-stream")
+        val CSV_TYPES = arrayOf("text/*", "application/csv", "application/vnd.ms-excel", "application/zip", "application/octet-stream")
     }
 }
