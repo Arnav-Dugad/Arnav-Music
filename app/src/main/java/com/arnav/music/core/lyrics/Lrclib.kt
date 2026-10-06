@@ -38,9 +38,11 @@ sealed interface OnlineLyrics {
  * prefers synced lyrics and the closest duration.
  */
 class LrclibClient(
-    private val client: OkHttpClient,
+    baseClient: OkHttpClient,
     private val userAgent: String,
 ) {
+    // Lyrics are a nice-to-have: never let a slow network hold the lyrics screen for long.
+    private val client = baseClient.newBuilder().callTimeout(10, java.util.concurrent.TimeUnit.SECONDS).build()
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; coerceInputValues = true }
 
     suspend fun find(track: Track): OnlineLyrics = withContext(Dispatchers.IO) {
