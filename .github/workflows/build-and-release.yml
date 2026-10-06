@@ -39,9 +39,14 @@ jobs:
         run: |
           if [ -n "$GOOGLE_SERVICES_JSON" ]; then
             echo "$GOOGLE_SERVICES_JSON" > app/google-services.json
-            echo "Firebase config provided"
+            echo "Firebase config provided by secret (overrides the committed file)"
+          elif [ -f app/google-services.json ]; then
+            echo "Using committed app/google-services.json (cloud edition)"
           else
             echo "No Firebase config: building local-only edition"
+          fi
+          if [ -f app/google-services.json ]; then
+            python3 -c "import json;d=json.load(open('app/google-services.json'));pk=[c['client_info']['android_client_info']['package_name'] for c in d['client']];assert 'com.arnav.music' in pk, pk;print('Firebase project', d['project_info']['project_id'], 'packages', pk)"
           fi
 
       - name: Provide private signing key (optional)

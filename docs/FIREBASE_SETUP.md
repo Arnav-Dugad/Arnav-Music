@@ -11,7 +11,7 @@ Everything here stays on the free **Spark** plan. Never attach a billing account
 
 ## 2. Register the Android app
 1. Project overview → **Add app → Android**.
-2. Package name: `com.arnav.music` (debug builds use `com.arnav.music.debug` — register both if you want Google sign-in in debug).
+2. Package name: `com.arnav.music` (debug and release builds share this id).
 3. Add SHA-1 and SHA-256 fingerprints:
    - Debug: `./gradlew :app:signingReport` (look for the `debug` variant).
    - Public community release key (`keystore/arnav-public.jks`):
@@ -58,6 +58,10 @@ Build → **Remote Config** → add any of these parameters (defaults are built 
 1. Build → **App Check** → register the Android app with **Play Integrity** (free).
 2. Debug builds: run once, copy the debug token from Logcat (`DebugAppCheckProvider`), add it under App Check → Manage debug tokens.
 3. After you confirm traffic is verified, click **Enforce** for Firestore and AI Logic.
+
+> **Sideloaded APKs and Play Integrity.** Play Integrity vouches for apps installed from Google Play. APKs downloaded from GitHub Releases are usually *not recognized*, so their App Check tokens are rejected. If AI Logic (or Firestore) is **enforced**, those installs can't use it — Arnav AI shows "On-device mode · App Check" and keeps working locally.
+> While you distribute through GitHub, either leave App Check **unenforced** (rely on Firestore rules + AI Logic per-user rate limits), or keep it enforced and accept on-device AI for sideloaded installs. Enforce everything once the app ships on Google Play.
+> Debug builds use the **debug provider**: run the app, copy the secret from Logcat tag `DebugAppCheckProvider`, and add it under App Check → Apps → ⋮ → Manage debug tokens.
 
 ## 8. Build with Firebase
 - Locally: `app/google-services.json` present → `./gradlew :app:assembleDebug`.

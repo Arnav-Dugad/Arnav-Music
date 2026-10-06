@@ -4,8 +4,6 @@ import android.content.Context
 import com.arnav.music.BuildConfig
 import com.arnav.music.core.common.Log
 import com.google.firebase.FirebaseApp
-import com.google.firebase.appcheck.FirebaseAppCheck
-import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
 
 /**
  * Single answer to "is the cloud available?". When the build has no google-services.json the
@@ -14,6 +12,8 @@ import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderF
 class FirebaseGate(private val context: Context) {
     @Volatile private var initialised = false
     @Volatile private var available = false
+
+    val appCheckProvider: String get() = AppCheckInstaller.PROVIDER
 
     val isAvailable: Boolean
         get() {
@@ -31,7 +31,7 @@ class FirebaseGate(private val context: Context) {
             if (app != null) {
                 runCatching {
                     // App Check (free) protects Firestore / AI Logic from abuse by non-genuine clients.
-                    FirebaseAppCheck.getInstance().installAppCheckProviderFactory(PlayIntegrityAppCheckProviderFactory.getInstance())
+                    AppCheckInstaller.install()
                 }
             }
             app != null

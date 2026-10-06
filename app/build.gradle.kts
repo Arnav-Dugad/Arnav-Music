@@ -70,7 +70,7 @@ android {
             signingConfig = signingConfigs.getByName("release")
         }
         debug {
-            applicationIdSuffix = ".debug"
+            // No applicationIdSuffix: google-services.json registers only com.arnav.music.
             versionNameSuffix = "-debug"
         }
     }

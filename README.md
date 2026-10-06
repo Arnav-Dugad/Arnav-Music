@@ -96,7 +96,7 @@ Arnav Music never requires a credit card, a paid plan or a paid API. It never en
 
 **Things that could require billing in the future (not used):** Cloud Functions, Firebase Storage on Blaze, Crashlytics/Performance Monitoring (left out to avoid build-time plugins and any billing ambiguity), paid Gemini tiers, licensed lyrics providers. None are wired in.
 
-Builds without `google-services.json` run in a fully functional **local-only edition** (no account, no cloud AI) — this is what public GitHub releases use unless the maintainer adds the Firebase secret.
+Releases are built with the project's `app/google-services.json` (public client config — the same values ship inside every APK; data is protected by Firestore rules and App Check). Forks without a Firebase config build a fully functional **local-only edition** (no account, no cloud AI).
 
 ## Architecture
 
@@ -176,7 +176,7 @@ Optional repository secrets (Settings → Secrets → Actions):
 
 | Secret | Purpose |
 |---|---|
-| `GOOGLE_SERVICES_JSON` | Contents of `google-services.json` → builds the full cloud edition |
+| `GOOGLE_SERVICES_JSON` | Optional override for the committed `app/google-services.json` (e.g. a different Firebase project) |
 | `YOUTUBE_API_KEY` | Built-in key (restrict it to the app's package + SHA-1!) |
 | `GOOGLE_WEB_CLIENT_ID` | Web OAuth client id for Google sign-in |
 | `ARNAV_KEYSTORE_BASE64`, `ARNAV_KEYSTORE_PASSWORD`, `ARNAV_KEY_ALIAS`, `ARNAV_KEY_PASSWORD` | Private release signing |
@@ -196,6 +196,7 @@ Arnav Music **does not**: extract stream URLs, use yt-dlp or similar, separate a
 
 ## Known limitations
 - YouTube playback stops when the app is backgrounded (by design; one-tap handoff to YouTube Music).
+- With App Check **enforced** on AI Logic, APKs installed from GitHub (not Google Play) usually fail Play Integrity attestation, so Gemini is blocked and Arnav AI uses its on-device engine. Unenforce AI Logic in App Check to allow cloud AI for sideloaded installs, or distribute through Google Play.
 - “Energy” and “style” hints for YouTube tracks are estimated from public titles/tags and are labelled as estimates.
 - Lyrics show an empty state until a licensed lyrics provider is added.
 - No ReplayGain/loudness normalisation (not reliably supported by Media3 across devices); fades and skip-silence are provided instead.

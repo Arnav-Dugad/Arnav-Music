@@ -17,7 +17,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import java.security.MessageDigest
 
-enum class AiUnavailableReason { DISABLED_BY_USER, NOT_CONFIGURED, DAILY_LIMIT, THROTTLED, QUOTA, OFFLINE, TIMEOUT, MALFORMED, ERROR }
+enum class AiUnavailableReason { DISABLED_BY_USER, NOT_CONFIGURED, DAILY_LIMIT, THROTTLED, QUOTA, APP_CHECK, OFFLINE, TIMEOUT, MALFORMED, ERROR }
 
 sealed interface AiOutcome {
     data class Ok(val text: String, val cached: Boolean) : AiOutcome
@@ -40,6 +40,7 @@ class AiGateway(
     private val mutex = Mutex()
     @Volatile private var lastCallAt = 0L
     @Volatile private var quotaBlockedUntil = 0L
+    @Volatile private var appCheckBlockedUntil = 0L
 
     fun availability(): AiUnavailableReason? {
         val s = settings.settings.value
@@ -48,6 +49,7 @@ class AiGateway(
             !gate.isAvailable || !remote.tunables.value.aiEnabled -> AiUnavailableReason.NOT_CONFIGURED
             usage.state.value.aiRequests >= s.dailyAiLimit -> AiUnavailableReason.DAILY_LIMIT
             clock.now() < quotaBlockedUntil -> AiUnavailableReason.QUOTA
+            clock.now() < appCheckBlockedUntil -> AiUnavailableReason.APP_CHECK
             else -> null
         }
     }
@@ -87,7 +89,12 @@ class AiGateway(
             } catch (e: Exception) {
                 val msg = (e.message ?: "").lowercase()
                 Log.w("AI call failed", e)
-                if ("quota" in msg || "429" in msg || "resource_exhausted" in msg || "rate" in msg) {
+                if ("app check" in msg || "appcheck" in msg || "attestation" in msg || "app-check" in msg) {
+                    // Enforced App Check rejected this install (e.g. sideloaded APK + Play Integrity).
+                    // Stop trying for 6 hours; the on-device engine answers meanwhile.
+                    appCheckBlockedUntil = clock.now() + 6 * 60 * 60_000L
+                    AiOutcome.Unavailable(AiUnavailableReason.APP_CHECK)
+                } else if ("quota" in msg || "429" in msg || "resource_exhausted" in msg || "rate" in msg) {
                     // Back off for an hour; never hammer the free tier.
                     quotaBlockedUntil = clock.now() + 60 * 60_000L
                     AiOutcome.Unavailable(AiUnavailableReason.QUOTA)

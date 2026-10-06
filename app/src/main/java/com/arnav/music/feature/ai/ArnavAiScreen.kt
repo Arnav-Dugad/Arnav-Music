@@ -188,6 +188,7 @@ private fun ModeChip(mode: AiUnavailableReason?) {
         AiUnavailableReason.DISABLED_BY_USER -> "On-device mode" to "Cloud AI is off in Settings. The local engine still understands moods, time and energy."
         AiUnavailableReason.NOT_CONFIGURED -> "On-device mode" to "Cloud AI isn't set up in this build. The local engine handles requests."
         AiUnavailableReason.DAILY_LIMIT, AiUnavailableReason.QUOTA -> "On-device mode" to "Today's free AI allowance is used. The local engine takes over until tomorrow."
+        AiUnavailableReason.APP_CHECK -> "On-device mode" to "This install couldn't be verified by App Check (common for APKs not installed from Google Play), so cloud AI is blocked. The local engine handles requests."
         else -> "On-device mode" to "The local engine handles requests right now."
     }
     Row(Modifier.clip(RoundedCornerShape(Radius.m)).background(c.content.copy(alpha = 0.06f)).padding(horizontal = Space.m, vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
