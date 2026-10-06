@@ -87,6 +87,18 @@ Everything around playback — library, history, recommendations, Taste DNA, Mom
 - **Import from Spotify or CSV**: pick your Spotify data export (`.zip`/`.json`) or any CSV. Songs are matched against music on your phone first, then against YouTube. Official "Topic" uploads are preferred, and matching stays under the free daily quota.
 - **YouTube playlist re-sync**: refresh imported YouTube playlists on demand. They also refresh quietly once a day when Google already allows it.
 - **Widgets & system**: Now Playing, Up Next (queue) and Your Week widgets, all lock-screen capable where Android supports it. Also a Quick Settings tile, a Like button in the media notification/lock screen, and a themed (monochrome) icon.
+- **Lyrics, deeper**: full-screen lyrics over the cover blurred across the whole screen; the line being sung appears under the title in the mini player; on analyzed songs from your phone the sung line swells very slightly with the song's loudness.
+- **Long-press to preview**: hold any cover to hear about 15 s from a third of the way in (YouTube in its own visible player). Whatever was playing pauses and resumes afterwards.
+- **Tactile covers**: cards tilt toward your finger while pressed. Swipe down on the Now Playing cover to close the player, and a new song's cover spirals out from the play button.
+- **Colour that follows the music**: each playlist page takes its accent from its cover, and the tab bar picks up the artwork's colour while music plays.
+- **Key detection & Harmonic mix**: songs on your phone get their musical key (with Camelot code). *Harmonic mix* in Up Next reorders songs so keys, tempos and energy flow, and the queue glides into the new order. Shuffle animates the same way.
+- **Smart transitions**: analyzed songs fade out where their outro begins and the next song skips silence at its start (soft intros are kept).
+- **Listening calendar**: a GitHub-style heatmap of the last year in Insights. Tap a day to see its minutes.
+- **Play counts & first-played dates** in every song's menu.
+- **Duplicate finder**: the same song across imports, your phone and YouTube, with "Keep this version" to tidy every playlist at once.
+- **Import history**: undo or redo any Spotify, CSV or YouTube import.
+- **Lyrics widget**, **Android Auto** (songs on your phone, with browse, voice search and chapter buttons), **home-screen shortcuts** for any playlist (plus the 4 most recent as launcher shortcuts), and **chapters** for long tracks (from the file or the YouTube description).
+- **Tested on an emulator**: every push runs a suite of end-to-end UI tests on an Android 14 emulator in GitHub Actions. It covers onboarding, navigation regressions, search, every settings page, local playback with lyrics, rotation and a seeded random-tap smoke test.
 
 **Everything else**
 - Home composed from ≤8 prioritised sections (time-of-day aware); never an empty first launch.
@@ -223,6 +235,8 @@ Arnav Music **does not**: extract stream URLs, use yt-dlp or similar, separate a
 - “Energy” and “style” hints for YouTube tracks are estimated from public titles/tags and are labelled as estimates.
 - Lyrics appear for songs whose files embed them, or once you import/paste them. There's no free licensed online lyrics provider, so streaming tracks start without lyrics.
 - Google's At a Glance doesn't accept third-party content, so Arnav Music can't place a card there.
+- Android Auto shows only songs on your phone (YouTube can't play there). Sideloaded builds need *Unknown sources* turned on in Android Auto's developer settings.
+- Smart transitions fade between songs; they don't overlap two songs at once.
 - No ReplayGain/loudness normalisation (not reliably supported by Media3 across devices); fades and skip-silence are provided instead.
 - Baseline profile is hand-written; a generated profile (Macrobenchmark) is on the roadmap.
 - YouTube Music's own *Liked music* list isn't exposed by the YouTube Data API. Import brings over *Liked videos* and your playlists instead.
