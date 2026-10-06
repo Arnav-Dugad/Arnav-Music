@@ -74,8 +74,8 @@ class ArnavWidget : GlanceAppWidget() {
         val tall = LocalSize.current.height >= 100.dp
         val p = widgetPalette()
         val open = openPlayerAction(context)
-        // The compact (one-row) size is too short for the 16 dp Material 3 padding.
-        Column(GlanceModifier.widgetRoot(p, if (tall) p.padding(12.dp) else 12.dp)) {
+        // 12 dp in both styles: this widget's sizes are too short for the 16 dp Material 3 padding.
+        Column(GlanceModifier.widgetRoot(p, 12.dp)) {
             Row(GlanceModifier.fillMaxWidth().clickable(open), verticalAlignment = Alignment.CenterVertically) {
                 Artwork(art, if (tall) 64 else 44)
                 Spacer(GlanceModifier.width(12.dp))
