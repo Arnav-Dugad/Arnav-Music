@@ -175,6 +175,8 @@ class CloudSync(
                     artworkUrl = m["artworkUrl"] as? String, pinned = m["pinned"] as? Boolean ?: false,
                     createdAt = (m["createdAt"] as? Long) ?: r.updatedAt, updatedAt = r.updatedAt,
                     deleted = r.deleted, dirty = false,
+                    // remoteRef isn't synced; keep the local link (e.g. an imported YouTube playlist).
+                    remoteRef = db.playlists().get(r.id)?.remoteRef,
                 ),
             )
             @Suppress("UNCHECKED_CAST")

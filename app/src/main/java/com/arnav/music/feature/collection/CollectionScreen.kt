@@ -1,5 +1,7 @@
 package com.arnav.music.feature.collection
 
+import com.arnav.music.ui.sharedArt
+import com.arnav.music.ui.ArtKeys
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -114,6 +116,7 @@ fun CollectionScreen(kind: CollectionKind, id: String, vm: CollectionViewModel =
     LaunchedEffect(ui.tracks.isNotEmpty()) { if (id == "shuffle" && ui.tracks.isNotEmpty()) app.play(ui.tracks, 0, shuffle = true) }
 
     CollectionScaffold(
+        sharedKey = ArtKeys.collection(kind, id),
         title = ui.title, subtitle = ui.subtitle, kindLabel = ui.kindLabel, description = ui.description, tracks = visible, allTracks = ui.tracks,
         loading = ui.loading, youtube = ui.youtube,
         actions = {
@@ -217,6 +220,7 @@ private fun CollectionScaffold(
     emptyTitle: String, emptyBody: String, round: Boolean = false,
     pending: List<PendingMatchEntity> = emptyList(), matchingIds: Set<Long> = emptySet(),
     onPendingTap: ((PendingMatchEntity) -> Unit)? = null, onPendingRemove: ((PendingMatchEntity) -> Unit)? = null,
+    sharedKey: String? = null,
 ) {
     val app = LocalAppViewModel.current
     val nav = LocalNavigator.current
@@ -246,7 +250,7 @@ private fun CollectionScaffold(
             }
             item(key = "hero") {
                 Column(Modifier.fillMaxWidth().padding(horizontal = Space.gutter), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Mosaic(art, title, Modifier.size(220.dp).graphicsLayer { shadowElevation = 24.dp.toPx(); shape = if (round) CircleShape else RoundedCornerShape(Radius.heroArtwork); clip = true },
+                    Mosaic(art, title, Modifier.sharedArt(sharedKey).size(220.dp).graphicsLayer { shadowElevation = 24.dp.toPx(); shape = if (round) CircleShape else RoundedCornerShape(Radius.heroArtwork); clip = true },
                         shape = if (round) CircleShape else RoundedCornerShape(Radius.heroArtwork))
                     Spacer(Modifier.height(Space.xl))
                     Row(verticalAlignment = Alignment.CenterVertically) {

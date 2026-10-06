@@ -1,5 +1,7 @@
 package com.arnav.music.feature.library
 
+import com.arnav.music.ui.sharedArt
+import com.arnav.music.ui.ArtKeys
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -131,9 +133,12 @@ fun LibraryScreen(vm: LibraryViewModel = koinViewModel(), importVm: PlaylistImpo
     val grid = layout == LibraryLayout.GRID
     val playingId = player.current?.id
 
+    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    com.arnav.music.ui.OnTabReselect(Routes.LIBRARY) { gridState.animateScrollToItem(0) }
     LazyVerticalGrid(
         columns = if (grid) GridCells.Adaptive(150.dp) else GridCells.Fixed(1),
         modifier = Modifier.fillMaxSize(),
+        state = gridState,
         contentPadding = PaddingValues(bottom = chrome.calculateBottomPadding() + Space.xl),
         horizontalArrangement = Arrangement.spacedBy(if (grid) Space.m else 0.dp),
         verticalArrangement = Arrangement.spacedBy(if (grid) Space.l else 0.dp),
@@ -203,7 +208,7 @@ fun LibraryScreen(vm: LibraryViewModel = koinViewModel(), importVm: PlaylistImpo
                     full {
                         LazyRow(contentPadding = PaddingValues(horizontal = Space.gutter), horizontalArrangement = Arrangement.spacedBy(Space.m)) {
                             items(mixes, key = { it.kind.name }) { m ->
-                                com.arnav.music.ui.components.MixCard(m.kind.title, m.kind.blurb, m.artwork, m.kind.name, { nav.go(Routes.collection(CollectionKind.SMART, m.kind.name)) }, width = 136.dp)
+                                com.arnav.music.ui.components.MixCard(m.kind.title, m.kind.blurb, m.artwork, m.kind.name, { nav.go(Routes.collection(CollectionKind.SMART, m.kind.name)) }, width = 136.dp, sharedKey = ArtKeys.smart(m.kind.name))
                             }
                         }
                     }
@@ -269,17 +274,19 @@ private fun LazyGridScope.playlistItems(playlists: List<com.arnav.music.domain.m
     items(playlists, key = { it.id }, span = { if (grid) GridItemSpan(1) else GridItemSpan(maxLineSpan) }) { p ->
         val nav = LocalNavigator.current
         val c = ArnavTheme.colors
-        val open = { nav.go(Routes.collection(if (p.kind == PlaylistKind.YOUTUBE) CollectionKind.YOUTUBE_PLAYLIST else CollectionKind.PLAYLIST, p.id)) }
+        val target = if (p.kind == PlaylistKind.YOUTUBE) CollectionKind.YOUTUBE_PLAYLIST else CollectionKind.PLAYLIST
+        val artKey = ArtKeys.collection(target, p.id)
+        val open = { nav.go(Routes.collection(target, p.id)) }
         if (grid) {
             Column(Modifier.padding(horizontal = Space.s).clip(RoundedCornerShape(Radius.m)).clickable(onClick = open)) {
-                Artwork(p.artworkUrl, p.id, Modifier.fillMaxWidth().aspectRatio(1f), decodeSize = 300)
+                Artwork(p.artworkUrl, p.id, Modifier.sharedArt(artKey).fillMaxWidth().aspectRatio(1f), decodeSize = 300)
                 Spacer(Modifier.height(Space.s))
                 Text(p.name, style = ArnavTheme.type.titleSmall, color = c.content, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(kindLabel(p.kind) + " · ${p.trackCount}", style = ArnavTheme.type.caption, color = c.contentMuted)
             }
         } else {
             Row(Modifier.fillMaxWidth().clickable(onClick = open).padding(horizontal = Space.gutter, vertical = if (layout == LibraryLayout.COMPACT) 6.dp else Space.s), verticalAlignment = Alignment.CenterVertically) {
-                Artwork(p.artworkUrl, p.id, Modifier.size(if (layout == LibraryLayout.COMPACT) 44.dp else 56.dp), RoundedCornerShape(Radius.s), decodeSize = 160)
+                Artwork(p.artworkUrl, p.id, Modifier.sharedArt(artKey).size(if (layout == LibraryLayout.COMPACT) 44.dp else 56.dp), RoundedCornerShape(Radius.s), decodeSize = 160)
                 Spacer(Modifier.width(Space.m))
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {

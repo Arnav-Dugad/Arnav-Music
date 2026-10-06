@@ -1,5 +1,6 @@
 package com.arnav.music.core.repo
 
+import com.arnav.music.core.analysis.withFeatures
 import com.arnav.music.core.common.Clock
 import com.arnav.music.core.db.ArnavDatabase
 import com.arnav.music.core.db.LikeEntity
@@ -46,7 +47,10 @@ class LibraryRepository(
         }
     }
 
-    val localTracks: StateFlow<List<Track>> = local.tracks().stateIn(scope, SharingStarted.WhileSubscribed(10_000), emptyList())
+    /** On-device songs, with measured energy from on-device audio analysis where available. */
+    val localTracks: StateFlow<List<Track>> = kotlinx.coroutines.flow.combine(local.tracks(), db.audioFeatures().summaries()) { tracks, features ->
+        if (features.isEmpty()) tracks else tracks.withFeatures(features.associateBy { it.trackId })
+    }.stateIn(scope, SharingStarted.WhileSubscribed(10_000), emptyList())
 
     val eventCount: Flow<Int> = db.events().count()
 
