@@ -62,10 +62,14 @@ jobs:
           fi
 
       - name: Unit tests
-        run: ./gradlew --stacktrace :core:domain:test :app:testDebugUnitTest
+        run: |
+          set -o pipefail
+          ./gradlew --continue :core:domain:test :app:testDebugUnitTest 2>&1 | tee -a build.log
 
       - name: Assemble release APK (R8)
-        run: ./gradlew --stacktrace :app:assembleRelease
+        run: |
+          set -o pipefail
+          ./gradlew :app:assembleRelease 2>&1 | tee -a build.log
 
       - name: Lint
         run: ./gradlew :app:lintRelease
@@ -85,6 +89,22 @@ jobs:
           name: ArnavMusic-${{ steps.apk.outputs.version }}
           path: dist/
           if-no-files-found: error
+
+      - name: Error summary
+        if: failure()
+        run: |
+          echo "::group::Compiler / test errors"
+          grep -E "^e: |^w: .*(error)|FAILED|What went wrong|AssertionError|Expected|\.kt:[0-9]+" build.log | grep -v "^w: " | head -n 120 || true
+          echo "::endgroup::"
+          {
+            echo '### Build errors'
+            echo '```'
+            grep -E "^e: |FAILED|What went wrong" build.log | head -n 60 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "=== ERRORS ==="
+          grep -E "^e: " build.log | head -n 80 || true
+          grep -B2 -A12 "FAILED$" build.log | grep -vE "^\s+at (org.gradle|java\.|jdk\.|sun\.)" | head -n 80 || true
 
       - name: Upload test & lint reports
         if: always()

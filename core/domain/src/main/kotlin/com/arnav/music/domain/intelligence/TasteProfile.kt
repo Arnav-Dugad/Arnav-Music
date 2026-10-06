@@ -82,8 +82,8 @@ object TasteProfileBuilder {
             artist.merge(e.artistKey, w, Double::plus)
             trackWeight.merge(e.trackId, w, Double::plus)
             if (!e.skipped || e.completionRatio > 0.5f) counts.merge(e.trackId, 1, Int::plus)
-            lastPlayed.merge(e.trackId, e.startedAt, ::maxOf)
-            artistLast.merge(e.artistKey, e.startedAt, ::maxOf)
+            lastPlayed.merge(e.trackId, e.startedAt) { a, b -> maxOf(a, b) }
+            artistLast.merge(e.artistKey, e.startedAt) { a, b -> maxOf(a, b) }
             tracks[e.trackId]?.let { t ->
                 t.genres.forEach { g -> genre.merge(g.lowercase(), w, Double::plus) }
                 t.energy?.let { en ->
