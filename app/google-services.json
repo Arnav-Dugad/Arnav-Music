@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "974076367492",
+    "project_id": "arnav-music-c8ca5",
+    "storage_bucket": "arnav-music-c8ca5.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:974076367492:android:57b7d259fed484ff40a8d1",
+        "android_client_info": {
+          "package_name": "com.arnav.music"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCdmqN4gjJA49He4HbMZn0-3j7qB82Dtv8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
