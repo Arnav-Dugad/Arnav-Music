@@ -379,7 +379,13 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
                 onShare = { navigator.share(s.track) },
                 onLyrics = { sheet = SheetRequest.Lyrics(s.track) },
                 onCredits = { scope.launch { expand.animateTo(0f, motion.cinematic()) }; navigator.go(Routes.credits(s.track.id.value)) },
-                onRadio = { scope.launch { val radio = intelligence.radio(s.track); if (radio.isNotEmpty()) vm.play(radio, 0) else vm.message("Not enough listening yet to build a radio for this song") } },
+                onRadio = {
+                    scope.launch {
+                        val radio = intelligence.radio(s.track)
+                        if (radio.size > 1) { vm.play(radio, 0); vm.message("Radio from “${s.track.title.take(40)}” · ${radio.size} songs") }
+                        else vm.message("Not enough to build a radio for this song yet — play a little more first")
+                    }
+                },
                 onMoreLikeThis = { scope.launch { intelligence.moreLikeThis(s.track); vm.message("You'll hear more like “${s.track.title.take(40)}”") } },
                 onNotInterested = {
                     scope.launch { intelligence.notInterested(s.track) }
