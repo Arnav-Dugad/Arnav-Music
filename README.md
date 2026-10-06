@@ -98,6 +98,18 @@ Everything around playback — library, history, recommendations, Taste DNA, Mom
 - **Duplicate finder**: the same song across imports, your phone and YouTube, with "Keep this version" to tidy every playlist at once.
 - **Import history**: undo or redo any Spotify, CSV or YouTube import.
 - **Lyrics widget**, **Android Auto** (songs on your phone, with browse, voice search and chapter buttons), **home-screen shortcuts** for any playlist (plus the 4 most recent as launcher shortcuts), and **chapters** for long tracks (from the file or the YouTube description).
+- **A real recommender, on your phone**: it learns from every play (finished, skipped early or late, replayed), likes, your own and imported playlists, searches, the time of day and day of week, which songs follow which in your sessions, and the sound of songs on your phone (tempo, key, energy). It combines played-together statistics, a song–artist–genre graph, a small taste embedding and sound similarity. The blend tunes itself to what you finish or skip, keeps artists varied, and explains every pick ("Often follows Kesariya in your sessions"). Home gets **For you right now**, **Daily mixes**, **Fresh finds** and **Rediscover**. Every song has **Start radio**, **More like this**, **Not interested** and **Don't recommend this artist**, and **endless radio** keeps the music going when the queue ends.
+- **Top songs this month**: a smart playlist that rebuilds itself every calendar month.
+- **Lyrics translation & romanisation**: an on-device translation (ML Kit) and Latin-letter romanisation under each line. The sung line also bounces lightly on the beat for analyzed songs.
+- **Sing mode**: lowers the vocals of songs on your phone, live, while bass and stereo-panned instruments stay. Tap the mic in Now Playing; long-press for the level.
+- **Download lyrics for a playlist**: fetches LRCLIB lyrics for every song in one go, for offline use.
+- **Credits**: writers, producers, engineers, label, ℗/© and ISRC, read from your files' tags or YouTube "Topic" descriptions.
+- **Albums**: an Albums tab and album pages with Disc 1/Disc 2 sections and track numbers, for music on your phone.
+- **Missing info fixed automatically**: unknown artists, albums and covers for songs on your phone are filled in from MusicBrainz and Cover Art Archive on Wi-Fi (your files are never modified). You can also edit any song's info by hand.
+- **Artist history**: each artist page shows your plays, listening time, first and last listen, a 12-month chart, your top songs and when you play them most.
+- **Premium motion**: playlist headers collapse with a parallax cover, and pressing Play flies the cover into Now Playing as its colours take over the page. The whole theme crossfades between songs. The cover breathes while playing and settles back when paused. Songs on your phone get a waveform progress bar drawn from their measured loudness, and the back gesture follows the Android 15 style.
+- **Material You widgets** that follow your wallpaper colours (or keep the dark glass look).
+- **Clean YouTube player**: YouTube's controls are hidden (via its official option) and replaced by Arnav Music's own. In Song mode, what's on screen is just the album art.
 - **Tested on an emulator**: every push runs a suite of end-to-end UI tests on an Android 14 emulator in GitHub Actions. It covers onboarding, navigation regressions, search, every settings page, local playback with lyrics, rotation and a seeded random-tap smoke test.
 
 **Everything else**
