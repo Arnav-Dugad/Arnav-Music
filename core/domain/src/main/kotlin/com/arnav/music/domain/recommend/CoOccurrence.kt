@@ -113,6 +113,17 @@ class CoOccurrence<K : Any>(val window: Int = 4, val alpha: Double = 0.75) {
         for (x in 0 until row.size) { val j = row[x]; f(keys[j], pairs.get(pairKey(i, j))) }
     }
 
+    /** Calls [f] once per co-occurring pair (a, b) with their cosine. */
+    fun forEachPair(f: (K, K, Double) -> Unit) {
+        for (i in keys.indices) {
+            val row = adj[i] ?: continue
+            for (x in 0 until row.size) {
+                val j = row[x]
+                if (j > i) f(keys[i], keys[j], cosineIdx(i, j))
+            }
+        }
+    }
+
     fun cosine(a: K, b: K): Double {
         val i = ids[a] ?: return 0.0
         val j = ids[b] ?: return 0.0

@@ -78,13 +78,18 @@ class TasteModel(
     fun played(id: TrackId): Boolean = lastPlayed.containsKey(id)
 
     /** Share of this context's listening that went to [artist], scaled by confidence in the context. */
+    private val contextTop = DoubleArray(ListeningContext.COUNT) { c -> contextArtists[c].values.maxOrNull() ?: 0.0 }
+
     fun contextAffinity(artist: String, ctx: ListeningContext): Double {
         val total = contextTotals[ctx.index]
-        if (total <= 0) return 0.0
-        val share = (contextArtists[ctx.index][artist] ?: 0.0) / total
-        val top = contextArtists[ctx.index].values.maxOrNull() ?: return 0.0
-        return (share / (top / total)) * (total / (total + 3.0))
+        val top = contextTop[ctx.index]
+        if (total <= 0 || top <= 0) return 0.0
+        return ((contextArtists[ctx.index][artist] ?: 0.0) / top) * (total / (total + 3.0))
     }
+
+    /** The [n] artists most played in [ctx], strongest first. */
+    fun topContextArtists(ctx: ListeningContext, n: Int): List<String> =
+        contextArtists[ctx.index].entries.sortedWith(compareByDescending<Map.Entry<String, Double>> { it.value }.thenBy { it.key }).take(n).map { it.key }
 
     /** How much more this artist is played in [ctx] than overall (1 = no different). */
     fun contextLift(artist: String, ctx: ListeningContext): Double {
@@ -109,13 +114,19 @@ class TasteModel(
     /** Preferred energy in [ctx], falling back to overall and then to onboarding moods. */
     fun energyTarget(ctx: ListeningContext?): Double? = ctx?.let { contextEnergy[it.index] } ?: energyMean ?: coldEnergy
 
-    fun topArtists(n: Int): List<String> = artistLong.keys.sortedWith(compareByDescending<String> { artistAffinity(it) }.thenBy { it }).take(n)
+    private val artistsRanked: List<String> by lazy {
+        (artistLong.keys + artistShort.keys).distinct().map { it to artistAffinity(it) }
+            .sortedWith(compareByDescending<Pair<String, Double>> { it.second }.thenBy { it.first }).map { it.first }
+    }
+    private val shortRanked: List<TrackId> by lazy { ranked(trackShort) }
+    private val longRanked: List<TrackId> by lazy { ranked(trackLong) }
 
-    fun topTracksShort(n: Int): List<TrackId> =
-        trackShort.entries.filter { it.value > 0 }.sortedWith(compareByDescending<Map.Entry<TrackId, Double>> { it.value }.thenBy { it.key.value }).take(n).map { it.key }
+    private fun ranked(m: Map<TrackId, Double>): List<TrackId> =
+        m.entries.filter { it.value > 0 }.sortedWith(compareByDescending<Map.Entry<TrackId, Double>> { it.value }.thenBy { it.key.value }).map { it.key }
 
-    fun topTracksLong(n: Int): List<TrackId> =
-        trackLong.entries.filter { it.value > 0 }.sortedWith(compareByDescending<Map.Entry<TrackId, Double>> { it.value }.thenBy { it.key.value }).take(n).map { it.key }
+    fun topArtists(n: Int): List<String> = artistsRanked.take(n)
+    fun topTracksShort(n: Int): List<TrackId> = shortRanked.take(n)
+    fun topTracksLong(n: Int): List<TrackId> = longRanked.take(n)
 
     /** 1 with no history, fading to ~0 after ~100 listens: how much onboarding picks should matter. */
     val coldWeight: Double get() = exp(-eventCount / 40.0)

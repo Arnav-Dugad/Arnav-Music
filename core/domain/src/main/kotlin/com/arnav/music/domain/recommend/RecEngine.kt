@@ -55,9 +55,8 @@ class RecEngine(
     fun forYouNow(limit: Int = 20): List<Recommendation> {
         val session = model.sessionSeeds()
         val tasteSeeds = taste.topTracksShort(12).map { it to 0.4 + 0.6 * taste.trackShortNorm(it) } + moreLikeThisSeeds()
-        val ctxArtists = taste.artistLong.keys
-            .map { it to taste.contextAffinity(it, model.context) }.filter { it.second >= 0.3 }
-            .sortedByDescending { it.second }.take(6).toMap()
+        val ctxArtists = taste.topContextArtists(model.context, 6)
+            .map { it to taste.contextAffinity(it, model.context) }.filter { it.second >= 0.3 }.toMap()
         val anchors = (session.map { it.first } + taste.topTracksShort(6) + model.input.feedback.moreLikeThis.keys).distinct()
             .mapNotNull { model.track(it) }.take(12)
         val sessionEnergy = session.mapNotNull { (id, _) -> model.track(id)?.let { model.features(it).energy?.toDouble() } }.takeIf { it.isNotEmpty() }?.average()
@@ -299,8 +298,7 @@ class RecEngine(
             for ((a, w) in seeds.artists) restart.merge(WalkGraph.artist(a), 0.2 * w, Double::plus)
             for (g in plan.seedGenres) restart.merge(WalkGraph.genre(g), 0.1, Double::plus)
             if (restart.isNotEmpty()) {
-                val rank = graph.personalizedPageRank(restart, iterations = 18, tolerance = 1e-5)
-                val top = graph.scores(rank, "t:").entries.sortedByDescending { it.value }
+                val top = graph.pushRank(restart, "t:").entries.sortedWith(compareByDescending<Map.Entry<String, Double>> { it.value }.thenBy { it.key })
                 var taken = 0
                 for ((key, v) in top) {
                     if (taken >= GRAPH_TOP) break
@@ -340,7 +338,7 @@ class RecEngine(
         // Context: artists this listener plays at this time of day / week.
         val ctx = model.context
         if (plan.useContext && taste.contextTotals[ctx.index] > 0) {
-            for (a in taste.contextArtists[ctx.index].keys) {
+            for (a in taste.topContextArtists(ctx, 15)) {
                 val v = taste.contextAffinity(a, ctx)
                 if (v <= 0.05) continue
                 val why = if (taste.contextClaimHolds(a, ctx)) Explain.context(model.artistName(a), ctx) else null
@@ -371,11 +369,14 @@ class RecEngine(
         }
         // Rediscovery: long-term favourites gone quiet.
         if (plan.rediscover) {
+            val old = ArrayList<Pair<TrackId, Double>>()
             for ((id, last) in taste.lastPlayed) {
                 if (model.now - last <= 30 * DAY_MS.toLong()) continue
                 val v = taste.trackLongNorm(id) * (1 - taste.trackShortNorm(id)) * minOf(1.0, (model.now - last) / DAY_MS / 90.0)
-                if (v > 0.05) cand(id)?.max(RecSource.REDISCOVER, v, null)
+                if (v > 0.05) old += id to v
             }
+            old.sortWith(compareByDescending<Pair<TrackId, Double>> { it.second }.thenBy { it.first.value })
+            for ((id, v) in old.take(REDISCOVER_TOP)) cand(id)?.max(RecSource.REDISCOVER, v, null)
         }
 
         // Content similarity to the anchors — for a shortlist (cheap sources first), analysed files and same-genre songs.
@@ -408,6 +409,8 @@ class RecEngine(
         val maxRaw = DoubleArray(SOURCES.size)
         for (c in cands.values) for (i in SOURCES.indices) if (c.raw[i] > maxRaw[i]) maxRaw[i] = c.raw[i]
         val accumulate = intArrayOf(RecSource.SESSION.ordinal, RecSource.COOCCURRENCE.ordinal, RecSource.GRAPH.ordinal)
+        val baseArr = DoubleArray(SOURCES.size) { plan.base[SOURCES[it]] ?: Double.NaN }
+        val multArr = DoubleArray(SOURCES.size) { multipliers[SOURCES[it]] ?: 1.0 }
 
         val out = ArrayList<Recommendation>(cands.size)
         for (c in cands.values) {
@@ -417,13 +420,13 @@ class RecEngine(
             var domV = 0.0
             var domEvIdx = -1
             var domEvV = 0.0
-            for (s in SOURCES) {
-                val i = s.ordinal
-                val baseW = plan.base[s] ?: continue
+            for (i in SOURCES.indices) {
                 var v = c.raw[i]
                 if (v <= 0) continue
+                val baseW = baseArr[i]
+                if (baseW.isNaN()) continue
                 if (i in accumulate && maxRaw[i] > 0) v /= maxRaw[i]
-                val contribution = baseW * (multipliers[s] ?: 1.0) * v.coerceAtMost(1.0)
+                val contribution = baseW * multArr[i] * v.coerceAtMost(1.0)
                 src += contribution
                 if (contribution > domV) { domV = contribution; domIdx = i }
                 if (c.evidence[i] != null && contribution > domEvV) { domEvV = contribution; domEvIdx = i }
@@ -556,29 +559,31 @@ class RecEngine(
 
     private fun buildGraph(): WalkGraph {
         val b = WalkGraph.Builder()
-        val tracks = LinkedHashMap<TrackId, Track>()
-        for (t in candidates.values) tracks[t.id] = t
-        for ((id, t) in model.input.tracks) tracks.putIfAbsent(id, t)
-        for (t in tracks.values) {
-            val node = WalkGraph.track(t.id.value)
+        val nodeOf = HashMap<TrackId, Int>()
+        val artistNode = HashMap<String, Int>()
+        val genreNode = HashMap<String, Int>()
+        val eraNode = HashMap<Int, Int>()
+        fun add(t: Track) {
+            if (nodeOf.containsKey(t.id)) return
+            val node = b.node(WalkGraph.track(t.id.value))
+            nodeOf[t.id] = node
             val f = model.features(t)
-            b.edge(node, WalkGraph.artist(f.artistKey), 1.0)
-            if (f.genres.isNotEmpty()) for (g in f.genres) b.edge(node, WalkGraph.genre(g), 0.6 / f.genres.size)
-            f.decade?.let { b.edge(node, WalkGraph.era(it), 0.15) }
+            b.edge(node, artistNode.getOrPut(f.artistKey) { b.node(WalkGraph.artist(f.artistKey)) }, 1.0)
+            for (g in f.genres) b.edge(node, genreNode.getOrPut(g) { b.node(WalkGraph.genre(g)) }, 0.6 / f.genres.size)
+            f.decade?.let { d -> b.edge(node, eraNode.getOrPut(d) { b.node(WalkGraph.era(d)) }, 0.15) }
         }
+        for (t in candidates.values) add(t)
+        for (t in model.input.tracks.values) add(t)
         for (p in model.input.playlists) {
             val w = if (p.userMade) 1.0 else 0.35
-            for ((id, _) in p.tracks) b.edge(WalkGraph.track(id.value), WalkGraph.playlist(p.id), w)
+            val pn = b.node(WalkGraph.playlist(p.id))
+            for ((id, _) in p.tracks) nodeOf[id]?.let { b.edge(it, pn, w) }
         }
-        // Session co-occurrence: cosine-weighted track–track edges (each pair once).
-        val co = model.index.tracks
-        for (id in co.items) {
-            val from = WalkGraph.track(id.value)
-            co.forEachNeighbour(id) { other, _ ->
-                if (id.value < other.value) {
-                    val cos = co.cosine(id, other)
-                    if (cos >= 0.05) b.edge(from, WalkGraph.track(other.value), 2.0 * cos)
-                }
+        // Session co-occurrence: cosine-weighted track–track edges.
+        model.index.tracks.forEachPair { x, y, cos ->
+            if (cos >= 0.05) {
+                val i = nodeOf[x]; val j = nodeOf[y]
+                if (i != null && j != null) b.edge(i, j, 2.0 * cos)
             }
         }
         return b.build()
@@ -593,6 +598,7 @@ class RecEngine(
         const val GRAPH_TOP = 600
         const val DISCOVERY_TOP = 300
         const val DEDUPE_HEAD = 600
+        const val REDISCOVER_TOP = 200
         const val ARTIST_DIMS = 24
         const val GENRE_DIMS = 12
         val SESSION = RecSource.SESSION
