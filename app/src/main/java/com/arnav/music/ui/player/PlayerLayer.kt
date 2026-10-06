@@ -68,6 +68,7 @@ import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Lyrics
+import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.OpenInFull
@@ -161,6 +162,7 @@ class PlayerActions(
     val switchVariant: (com.arnav.music.domain.model.MediaVariant) -> Unit = {},
     val findAnotherUpload: () -> Unit = {},
     val skipTo: (Int) -> Unit = {},
+    val openCredits: (Track) -> Unit = {},
 )
 
 /**
@@ -976,6 +978,7 @@ private fun Transport(
         // Sing: lowers the vocals of songs on this phone (on-device DSP).
         if (track.source == SourceType.LOCAL) com.arnav.music.ui.lyrics.SingButton(enabled = true, tint = muted, accent = accent)
         ArnavIconButton(Icons.Rounded.Bedtime, if (state.sleep != null) "Sleep timer on" else "Sleep timer", actions.onSleep, tint = if (state.sleep != null) accent else muted, size = 20.dp)
+        ArnavIconButton(Icons.Rounded.Groups, "Credits", { actions.openCredits(track) }, tint = muted, size = 20.dp)
         ArnavIconButton(Icons.AutoMirrored.Rounded.QueueMusic, "Queue", onQueue, tint = muted, size = 20.dp)
     }
     if (state.sleep != null) SleepCountdown(state.sleep, muted)

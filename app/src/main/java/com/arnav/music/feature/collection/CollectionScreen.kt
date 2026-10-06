@@ -242,6 +242,7 @@ fun ArtistScreen(name: String, vm: CollectionViewModel = koinViewModel()) {
         title = ui.title.ifBlank { name }, subtitle = ui.subtitle, kindLabel = "Artist", description = "", tracks = ui.tracks, allTracks = ui.tracks,
         loading = ui.loading && ui.tracks.isEmpty(), youtube = ui.youtube, actions = {}, filter = "", onFilter = null, sort = SmartSort.DEFAULT, onSort = null,
         error = ui.error, onRemove = null, history = null, round = true,
+        afterHero = { ArtistHistorySection(name) },
         emptyTitle = "Nothing from $name yet", emptyBody = "Search YouTube for $name, or add their music to your device.",
     )
 }
@@ -257,6 +258,8 @@ private fun CollectionScaffold(
     pending: List<PendingMatchEntity> = emptyList(), matchingIds: Set<Long> = emptySet(),
     onPendingTap: ((PendingMatchEntity) -> Unit)? = null, onPendingRemove: ((PendingMatchEntity) -> Unit)? = null,
     sharedKey: String? = null,
+    /** Content placed right after the header (e.g. an artist's listening history). */
+    afterHero: (@Composable () -> Unit)? = null,
     /** Extra content under the Play/Shuffle buttons (e.g. lyrics download progress). */
     heroExtra: @Composable () -> Unit = {},
 ) {
@@ -340,6 +343,7 @@ private fun CollectionScaffold(
                     heroExtra()
                 }
             }
+            afterHero?.let { slot -> item(key = "after_hero") { slot() } }
             if (onFilter != null && allTracks.size > 8) item(key = "filter") {
                 Column(Modifier.padding(top = Space.l)) {
                     Row(

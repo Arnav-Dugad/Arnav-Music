@@ -27,6 +27,8 @@ import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.OpenInNew
@@ -60,6 +62,9 @@ import com.arnav.music.domain.model.Playlist
 import com.arnav.music.domain.model.PlaylistKind
 import com.arnav.music.domain.model.SourceType
 import com.arnav.music.domain.model.Track
+import com.arnav.music.feature.credits.EditSongInfoDialog
+import com.arnav.music.ui.LocalNavigator
+import com.arnav.music.ui.Routes
 import com.arnav.music.ui.components.Artwork
 import com.arnav.music.ui.components.EmptyState
 import com.arnav.music.ui.components.Pill
@@ -111,10 +116,15 @@ fun TrackActionsSheet(
     onArtist: () -> Unit,
     onShare: () -> Unit,
     onLyrics: () -> Unit,
+    /** Opens the song's credits page; defaults to navigating there directly. */
+    onCredits: (() -> Unit)? = null,
 ) {
     val c = ArnavTheme.colors
     val context = LocalContext.current
+    val nav = LocalNavigator.current
     var info by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf(false) }
+    if (editing) EditSongInfoDialog(track) { editing = false; onDismiss() }
     ArnavSheet(onDismiss) {
         Row(Modifier.padding(horizontal = Space.gutter, vertical = Space.s), verticalAlignment = Alignment.CenterVertically) {
             Artwork(track.artworkUrl, track.id.value, Modifier.size(56.dp), RoundedCornerShape(Radius.s))
@@ -135,6 +145,8 @@ fun TrackActionsSheet(
         ActionRow(Icons.AutoMirrored.Rounded.PlaylistAdd, "Add to playlist", onAddToPlaylist)
         ActionRow(Icons.Rounded.Person, "Go to ${track.artist}", act(onArtist))
         ActionRow(Icons.Rounded.Lyrics, "Lyrics", onLyrics)
+        ActionRow(Icons.Rounded.Groups, "Credits", act { if (onCredits != null) onCredits() else nav.go(Routes.credits(track.id.value)) })
+        if (track.source == SourceType.LOCAL) ActionRow(Icons.Rounded.Edit, "Edit song info", { editing = true })
         ActionRow(Icons.Rounded.Share, "Share", act(onShare))
         if (track.source == SourceType.YOUTUBE) {
             ActionRow(Icons.Rounded.OpenInNew, "Open in YouTube Music", act {

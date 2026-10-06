@@ -19,6 +19,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.arnav.music.feature.ai.ArnavAiScreen
+import com.arnav.music.feature.album.AlbumScreen
+import com.arnav.music.feature.credits.CreditsScreen
 import com.arnav.music.feature.auth.AuthScreen
 import com.arnav.music.feature.collection.ArtistScreen
 import com.arnav.music.feature.collection.CollectionScreen
@@ -104,6 +106,12 @@ fun AppNavHost(nav: NavHostController) {
         screen(Routes.AUTH) { AuthScreen() }
         screen(Routes.DUPLICATES) { DuplicatesScreen() }
         screen(Routes.IMPORTS) { ImportHistoryScreen() }
+        screen(Routes.ALBUM, arguments = listOf(navArgument("albumId") { type = NavType.StringType })) {
+            AlbumScreen(it.arguments?.getString("albumId").orEmpty())
+        }
+        screen(Routes.CREDITS, arguments = listOf(navArgument("trackId") { type = NavType.StringType })) {
+            CreditsScreen(it.arguments?.getString("trackId").orEmpty())
+        }
         screen(Routes.SETTINGS) { SettingsScreen(page = "") }
         screen(Routes.SETTINGS_PAGE, arguments = listOf(navArgument("page") { type = NavType.StringType })) {
             SettingsScreen(page = it.arguments?.getString("page").orEmpty())

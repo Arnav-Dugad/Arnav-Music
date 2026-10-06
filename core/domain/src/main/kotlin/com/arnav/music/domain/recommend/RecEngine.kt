@@ -380,7 +380,7 @@ class RecEngine(
 
         // Content similarity to the anchors — for a shortlist (cheap sources first), analysed files and same-genre songs.
         if (plan.base.containsKey(RecSource.CONTENT) && seeds.content.isNotEmpty()) {
-            val prelim = cands.values.sortedByDescending { c -> c.raw.sum() }.take(CONTENT_SHORTLIST).map { it.track }
+            val prelim = cands.values.map { c -> c to c.raw.sum() }.sortedByDescending { it.second }.take(CONTENT_SHORTLIST).map { it.first.track }
             val analysed = candidates.values.asSequence().filter { model.input.traits.containsKey(it.id) && allowed(it) }.take(CONTENT_SHORTLIST).toList()
             val sameGenre = if (plan.seedGenres.isEmpty()) emptyList() else
                 candidates.values.asSequence().filter { allowed(it) && model.features(it).genres.any { g -> g in plan.seedGenres } }.take(CONTENT_SHORTLIST).toList()
@@ -570,8 +570,16 @@ class RecEngine(
             val w = if (p.userMade) 1.0 else 0.35
             for ((id, _) in p.tracks) b.edge(WalkGraph.track(id.value), WalkGraph.playlist(p.id), w)
         }
-        for (id in model.index.tracks.items) {
-            for (n in model.index.tracks.neighbours(id, 10)) b.edge(WalkGraph.track(id.value), WalkGraph.track(n.key.value), 2.0 * n.score)
+        // Session co-occurrence: cosine-weighted track–track edges (each pair once).
+        val co = model.index.tracks
+        for (id in co.items) {
+            val from = WalkGraph.track(id.value)
+            co.forEachNeighbour(id) { other, _ ->
+                if (id.value < other.value) {
+                    val cos = co.cosine(id, other)
+                    if (cos >= 0.05) b.edge(from, WalkGraph.track(other.value), 2.0 * cos)
+                }
+            }
         }
         return b.build()
     }

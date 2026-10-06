@@ -177,38 +177,63 @@ object TasteModelBuilder {
         val names = HashMap<String, String>()
         var eSum = 0.0; var eSq = 0.0; var eW = 0.0
 
+        // Pass 1: per-event work goes into flat arrays indexed by track (one hash lookup per play).
+        val index = HashMap<TrackId, Int>()
+        val ids = ArrayList<TrackId>()
+        val artistOfTrack = ArrayList<String>()
+        val n = events.size
+        val tl = DoubleArray(n); val ts = DoubleArray(n); val posW = DoubleArray(n)
+        val plays = IntArray(n); val early = IntArray(n); val pos = IntArray(n)
+        val lastAt = LongArray(n); val firstAt = LongArray(n)
+        val ctxW = DoubleArray(n * ListeningContext.COUNT)
+        val ctxN = IntArray(n * ListeningContext.COUNT)
         for ((i, e) in events.withIndex()) {
+            val k = index.getOrPut(e.trackId) {
+                ids += e.trackId; artistOfTrack += e.artistKey
+                firstAt[ids.size - 1] = e.startedAt
+                ids.size - 1
+            }
             val w = Engagement.weight(e, replays[i])
             val age = now - e.startedAt
             val dl = Decay.Long.factor(age)
-            val ds = Decay.Short.factor(age)
-            trackLong.merge(e.trackId, w * dl, Double::plus)
-            trackShort.merge(e.trackId, w * ds, Double::plus)
-            artistLong.merge(e.artistKey, w * dl, Double::plus)
-            artistShort.merge(e.artistKey, w * ds, Double::plus)
-            last.merge(e.trackId, e.startedAt, ::maxOf)
-            first.merge(e.trackId, e.startedAt, ::minOf)
-            artistPlays.merge(e.artistKey, 1, Int::plus)
-            if (Engagement.isEarlySkip(e)) {
-                earlySkips.merge(e.trackId, 1, Int::plus)
-                artistEarly.merge(e.artistKey, 1, Int::plus)
-            } else if (w > 0) positive.merge(e.trackId, 1, Int::plus)
-            val t = input.tracks[e.trackId]
-            if (t != null) {
-                names.putIfAbsent(e.artistKey, t.artist)
-                for (g in t.genres) genre.merge(g.lowercase(), w * dl, Double::plus)
-                t.year?.takeIf { it in 1900..2100 }?.let { decade.merge(it / 10 * 10, w * dl, Double::plus) }
-            }
+            tl[k] += w * dl
+            ts[k] += w * Decay.Short.factor(age)
+            lastAt[k] = e.startedAt
+            plays[k]++
+            if (Engagement.isEarlySkip(e)) early[k]++ else if (w > 0) pos[k]++
             if (w > 0) {
-                val ctx = ListeningContext.at(e.startedAt, input.zone).index
-                ctxArtists[ctx].merge(e.artistKey, w * dl, Double::plus)
-                ctxPlays[ctx].merge(e.artistKey, 1, Int::plus)
-                ctxTotals[ctx] += w * dl
-                val en = input.traits[e.trackId]?.energy?.takeIf { it.isFinite() }?.toDouble() ?: t?.energy?.toDouble()
-                if (en != null) {
-                    eSum += en * w * dl; eSq += en * en * w * dl; eW += w * dl
-                    ctxEnergySum[ctx] += en * w * dl; ctxEnergyW[ctx] += w * dl
-                }
+                val c = ListeningContext.at(e.startedAt, input.zone).index
+                posW[k] += w * dl
+                ctxW[k * ListeningContext.COUNT + c] += w * dl
+                ctxN[k * ListeningContext.COUNT + c]++
+            }
+        }
+        // Pass 2: fold tracks into artist, genre, era and context aggregates.
+        for (k in ids.indices) {
+            val id = ids[k]
+            val a = artistOfTrack[k]
+            trackLong[id] = tl[k]; trackShort[id] = ts[k]
+            last[id] = lastAt[k]; first[id] = firstAt[k]
+            if (pos[k] > 0) positive[id] = pos[k]
+            if (early[k] > 0) { earlySkips[id] = early[k]; artistEarly.merge(a, early[k], Int::plus) }
+            artistLong.merge(a, tl[k], Double::plus)
+            artistShort.merge(a, ts[k], Double::plus)
+            artistPlays.merge(a, plays[k], Int::plus)
+            val t = input.tracks[id]
+            if (t != null) {
+                names.putIfAbsent(a, t.artist)
+                for (g in t.genres) genre.merge(g.lowercase(), tl[k], Double::plus)
+                t.year?.takeIf { it in 1900..2100 }?.let { decade.merge(it / 10 * 10, tl[k], Double::plus) }
+            }
+            val en = input.traits[id]?.energy?.takeIf { it.isFinite() }?.toDouble() ?: t?.energy?.toDouble()
+            if (en != null && posW[k] > 0) { eSum += en * posW[k]; eSq += en * en * posW[k]; eW += posW[k] }
+            for (c in 0 until ListeningContext.COUNT) {
+                val cw = ctxW[k * ListeningContext.COUNT + c]
+                if (cw <= 0) continue
+                ctxArtists[c].merge(a, cw, Double::plus)
+                ctxPlays[c].merge(a, ctxN[k * ListeningContext.COUNT + c], Int::plus)
+                ctxTotals[c] += cw
+                if (en != null) { ctxEnergySum[c] += en * cw; ctxEnergyW[c] += cw }
             }
         }
 

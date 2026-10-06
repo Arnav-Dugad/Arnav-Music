@@ -34,7 +34,7 @@ class ArnavApp : Application(), SingletonImageLoader.Factory {
         super.onCreate()
         startKoin {
             androidContext(this@ArnavApp)
-            modules(appModule, chaptersModule)
+            modules(appModule, chaptersModule, com.arnav.music.core.metadata.metadataModule)
         }
         // Cloud work is deferred off the launch path; the UI never waits on Firebase.
         val scope: CoroutineScope = get()
@@ -87,6 +87,7 @@ class ArnavApp : Application(), SingletonImageLoader.Factory {
                 }
             }
             launch { com.arnav.music.core.importer.MatchWorker.ensureScheduled(this@ArnavApp, get()) }
+            launch { settings.settings.map { it.autoTagLocal }.distinctUntilChanged().collect { com.arnav.music.core.metadata.AutoTagWorker.schedule(this@ArnavApp, it) } }
             // Widgets restyle immediately when the Material You setting changes.
             launch {
                 settings.settings.map { it.widgetMaterialYou }.distinctUntilChanged().drop(1)

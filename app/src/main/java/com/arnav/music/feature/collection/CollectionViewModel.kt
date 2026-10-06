@@ -14,6 +14,7 @@ import com.arnav.music.core.repo.LibraryRepository
 import com.arnav.music.core.system.Shortcuts
 import com.arnav.music.core.youtube.YouTubeImporter
 import com.arnav.music.core.youtube.YouTubeRepository
+import com.arnav.music.domain.intelligence.ArtistHistories
 import com.arnav.music.domain.intelligence.SmartPlaylist
 import com.arnav.music.domain.model.ArtistKey
 import com.arnav.music.domain.model.Playlist
@@ -24,6 +25,7 @@ import com.arnav.music.domain.provider.SearchFilter
 import com.arnav.music.feature.library.describeYouTubeError
 import com.arnav.music.ui.CollectionKind
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,6 +34,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.time.ZoneId
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 
@@ -337,5 +341,29 @@ class CollectionViewModel(
         val fromSearch = remote?.tracks.orEmpty().filter { it.artistKey == key || it.artist.contains(name, true) }
         val all = (known + fromSearch).distinctBy { it.id }
         _artist.value = CollectionUi(false, name, "${all.size} songs", "Artist", tracks = all, youtube = fromSearch.isNotEmpty())
+    }
+
+    // ---- Artist listening history (see ArtistHistorySection) ----
+    private val _artistHistory = MutableStateFlow(ArtistHistoryUi())
+    val artistHistory: StateFlow<ArtistHistoryUi> = _artistHistory.asStateFlow()
+    private var historyJob: Job? = null
+
+    /** Loads the user's own play history of [name] (all time, from on-device play events). */
+    fun loadArtistHistory(name: String) {
+        val key = ArtistKey.of(name)
+        if (historyJob != null && _artistHistory.value.artistKey == key) return
+        historyJob?.cancel()
+        _artistHistory.value = ArtistHistoryUi(loading = true, artistKey = key)
+        historyJob = viewModelScope.launch {
+            val events = runCatching { library.events(0L) }.getOrDefault(emptyList())
+            val history = withContext(Dispatchers.Default) { ArtistHistories.build(events, key, clock.now(), ZoneId.systemDefault()) }
+            val tracks = runCatching { library.tracks(history.topTracks.map { it.trackId }) }.getOrDefault(emptyList()).associateBy { it.id }
+            _artistHistory.value = ArtistHistoryUi(
+                loading = false,
+                artistKey = key,
+                history = history,
+                topTracks = history.topTracks.mapNotNull { top -> tracks[top.trackId]?.let { it to top.plays } },
+            )
+        }
     }
 }

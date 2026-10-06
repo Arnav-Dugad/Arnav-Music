@@ -21,12 +21,18 @@ object Routes {
     const val AUTH = "auth"
     const val DUPLICATES = "duplicates"
     const val IMPORTS = "imports"
+    const val ALBUM = "album/{albumId}"
+    const val CREDITS = "credits/{trackId}"
 
     fun ai(q: String? = null) = "ai?q=" + Uri.encode(q.orEmpty())
     fun search(q: String? = null) = "search?q=" + Uri.encode(q.orEmpty())
     fun collection(kind: CollectionKind, id: String = "_") = "collection/${kind.name}/${Uri.encode(id)}"
     fun artist(name: String) = "artist/" + Uri.encode(name)
     fun moment(id: String) = "moment/$id"
+    /** An on-device album page (MediaStore album id). */
+    fun album(albumId: String) = "album/" + Uri.encode(albumId)
+    /** Credits for one song ([trackId] is a TrackId value, e.g. "yt:…" or "local:…"). */
+    fun credits(trackId: String) = "credits/" + Uri.encode(trackId)
     /** Root and sub-pages are distinct destinations so each sub-page stacks on top of Settings. */
     fun settings(page: String? = null) = if (page.isNullOrBlank()) SETTINGS else "settings/" + Uri.encode(page)
 

@@ -323,6 +323,7 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
                         switchVariant = vm.player::switchVariant,
                         findAnotherUpload = vm.player::findAnotherUpload,
                         skipTo = { vm.player.skipTo(it) },
+                        openCredits = { t -> scope.launch { expand.animateTo(0f, motion.cinematic()) }; navigator.go(Routes.credits(t.id.value)) },
                     ),
                     switchingVariant = switching,
                     pip = pip,
@@ -376,6 +377,7 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
                 onArtist = { scope.launch { expand.animateTo(0f, motion.cinematic()) }; navigator.go(Routes.artist(s.track.artist)) },
                 onShare = { navigator.share(s.track) },
                 onLyrics = { sheet = SheetRequest.Lyrics(s.track) },
+                onCredits = { scope.launch { expand.animateTo(0f, motion.cinematic()) }; navigator.go(Routes.credits(s.track.id.value)) },
             )
             is SheetRequest.AddToPlaylist -> PlaylistPickerSheet(
                 playlists, onDismiss = { sheet = null },

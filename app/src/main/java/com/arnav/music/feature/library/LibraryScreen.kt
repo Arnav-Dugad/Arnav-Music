@@ -35,6 +35,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.automirrored.rounded.ViewList
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Favorite
@@ -70,6 +71,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.arnav.music.core.settings.LibraryLayout
+import com.arnav.music.domain.library.AlbumSummary
+import com.arnav.music.feature.album.albumArtKey
 import com.arnav.music.domain.model.PlaylistKind
 import com.arnav.music.domain.model.Track
 import com.arnav.music.ui.CollectionKind
@@ -107,6 +110,7 @@ fun LibraryScreen(vm: LibraryViewModel = koinViewModel(), importVm: PlaylistImpo
     val liked by vm.liked.collectAsStateWithLifecycle()
     val local by vm.local.collectAsStateWithLifecycle()
     val artists by vm.artists.collectAsStateWithLifecycle()
+    val albums by vm.albums.collectAsStateWithLifecycle()
     val mixes by vm.mixes.collectAsStateWithLifecycle()
     val likedIds by app.liked.collectAsStateWithLifecycle()
     val player by app.playerState.collectAsStateWithLifecycle()
@@ -135,17 +139,19 @@ fun LibraryScreen(vm: LibraryViewModel = koinViewModel(), importVm: PlaylistImpo
         }
     }
     val grid = layout == LibraryLayout.GRID
+    // Albums are always a grid of covers.
+    val gridLike = grid || tab == LibraryTab.ALBUMS
     val playingId = player.current?.id
 
     val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
     com.arnav.music.ui.OnTabReselect(Routes.LIBRARY) { gridState.animateScrollToItem(0) }
     LazyVerticalGrid(
-        columns = if (grid) GridCells.Adaptive(150.dp) else GridCells.Fixed(1),
+        columns = if (gridLike) GridCells.Adaptive(150.dp) else GridCells.Fixed(1),
         modifier = Modifier.fillMaxSize(),
         state = gridState,
         contentPadding = PaddingValues(bottom = chrome.calculateBottomPadding() + Space.xl),
-        horizontalArrangement = Arrangement.spacedBy(if (grid) Space.m else 0.dp),
-        verticalArrangement = Arrangement.spacedBy(if (grid) Space.l else 0.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (gridLike) Space.m else 0.dp),
+        verticalArrangement = Arrangement.spacedBy(if (gridLike) Space.l else 0.dp),
     ) {
         full {
             Column(Modifier.statusBarsPadding().padding(top = Space.l)) {
@@ -264,6 +270,15 @@ fun LibraryScreen(vm: LibraryViewModel = koinViewModel(), importVm: PlaylistImpo
                     }
                 }
             }
+            LibraryTab.ALBUMS -> {
+                if (!hasLocal) full {
+                    EmptyState(Icons.Rounded.Album, "Albums from this phone", "Allow access to music on this device to browse it album by album.",
+                        action = "Allow access", onAction = { permissionLauncher.launch(app.localPermission) })
+                } else if (albums.isEmpty()) full {
+                    EmptyState(Icons.Rounded.Album, if (filter.isBlank()) "No albums yet" else "No matching albums", "Songs on this phone that carry album tags are grouped here, album by album.")
+                }
+                albumItems(albums)
+            }
             LibraryTab.LOCAL -> {
                 if (!hasLocal) full {
                     EmptyState(Icons.Rounded.PhoneAndroid, "Bring your own library", "Play music files on this phone with full background playback, lock-screen and Bluetooth controls. Files never leave your device.",
@@ -290,6 +305,22 @@ private fun LazyGridScope.trackItems(tracks: List<Track>, grid: Boolean, layout:
         } else {
             TrackRow(t, { app.play(tracks, i) }, playing = t.id == playingId, liked = t.id in liked, compact = layout == LibraryLayout.COMPACT,
                 onQueue = { app.addToQueue(t) }, onLike = { app.toggleLike(t) }, onMore = { nav.openSheet(SheetRequest.TrackActions(t)) })
+        }
+    }
+}
+
+private fun LazyGridScope.albumItems(albums: List<AlbumSummary>) {
+    items(albums, key = { "album_${it.id}" }) { a ->
+        val nav = LocalNavigator.current
+        val c = ArnavTheme.colors
+        Column(Modifier.padding(horizontal = Space.s).clip(RoundedCornerShape(Radius.m)).clickable { nav.go(Routes.album(a.id)) }) {
+            Artwork(a.artworkUrl, a.id, Modifier.sharedArt(albumArtKey(a.id)).fillMaxWidth().aspectRatio(1f), RoundedCornerShape(Radius.m), contentDescription = a.title, decodeSize = 300)
+            Spacer(Modifier.height(Space.s))
+            Text(a.title, style = ArnavTheme.type.titleSmall, color = c.content, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                listOfNotNull(a.artist, a.year?.toString(), "${a.trackCount} ${if (a.trackCount == 1) "song" else "songs"}").joinToString(" · "),
+                style = ArnavTheme.type.caption, color = c.contentMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

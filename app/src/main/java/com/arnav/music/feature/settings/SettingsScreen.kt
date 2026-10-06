@@ -366,6 +366,8 @@ private fun LibraryPage(vm: SettingsViewModel) {
             val analyzed by analyzedFlow.collectAsStateWithLifecycle(initialValue = 0)
             ToggleRow("Fix missing song info", s.autoTagLocal, { v -> vm.update { it.copy(autoTagLocal = v) } }, "Fills in missing artist, album and cover for songs on this phone from MusicBrainz, on Wi-Fi. Your files are never changed")
             Divider()
+            ActionRowS("Look up missing info now", "Uses MusicBrainz, about one song per second", enabled = s.autoTagLocal) { com.arnav.music.core.metadata.AutoTagWorker.runNow(context) }
+            Divider()
             ToggleRow("Analyze while charging", s.analyzeLocalAudio, { v -> vm.update { it.copy(analyzeLocalAudio = v) } }, "Runs quietly in the background, only when plugged in")
             Divider()
             InfoRow("Songs analyzed", "$analyzed")

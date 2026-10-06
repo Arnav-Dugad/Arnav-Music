@@ -127,7 +127,8 @@ object CreditRoles {
             r.contains("distribut") -> return Classified(CreditGroup.RIGHTS, "Distributor")
             r.contains("copyright") || r == "©" -> return Classified(CreditGroup.RIGHTS, "Copyright")
             r == "℗" || r == "phonographic copyright" -> return Classified(CreditGroup.RIGHTS, "℗")
-            r.contains("producer") -> return null // film/video producer and the like: not a music credit
+            // "Vocal Producer" on a Topic page is a music credit; "Film Producer" in a free-form description isn't.
+            r.contains("producer") -> return if (lenient || r.contains("vocal")) Classified(CreditGroup.PRODUCED, sentence(part)) else null
         }
         if (skipWords.any { r.contains(it) }) return null
         if (words.any { w -> instruments.any { w.startsWith(it) } }) {
