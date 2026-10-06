@@ -10,8 +10,9 @@ import androidx.room.RoomDatabase
         TrackEntity::class, LikeEntity::class, PlaylistEntity::class, PlaylistTrackEntity::class,
         PlayEventEntity::class, SearchCacheEntity::class, RecentSearchEntity::class, AiCacheEntity::class,
         KvSyncEntity::class, LyricsEntity::class, AudioFeaturesEntity::class, PendingMatchEntity::class, ImportHistoryEntity::class,
+        TagOverrideEntity::class, RecFeedbackEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class ArnavDatabase : RoomDatabase() {
@@ -26,6 +27,8 @@ abstract class ArnavDatabase : RoomDatabase() {
     abstract fun audioFeatures(): AudioFeaturesDao
     abstract fun pendingMatches(): PendingMatchDao
     abstract fun importHistory(): ImportHistoryDao
+    abstract fun tagOverrides(): TagOverrideDao
+    abstract fun recFeedback(): RecFeedbackDao
 
     companion object {
         const val NAME = "arnav-music.db"
@@ -56,9 +59,17 @@ abstract class ArnavDatabase : RoomDatabase() {
                 db.execSQL("CREATE TABLE IF NOT EXISTS `import_history` (`id` TEXT NOT NULL, `source` TEXT NOT NULL, `label` TEXT NOT NULL, `playlistIds` TEXT NOT NULL, `songCount` INTEGER NOT NULL, `matchedCount` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `undone` INTEGER NOT NULL, PRIMARY KEY(`id`))")
             }
         }
+        /** v5: MusicBrainz/user tag overrides for on-device songs; recommender feedback. */
+        val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `tag_overrides` (`trackId` TEXT NOT NULL, `title` TEXT, `artist` TEXT, `album` TEXT, `year` INTEGER, `mbid` TEXT, `artworkUrl` TEXT, `source` TEXT NOT NULL, `confidence` REAL NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`trackId`))")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `rec_feedback` (`subject` TEXT NOT NULL, `kind` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`subject`))")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_rec_feedback_kind` ON `rec_feedback` (`kind`)")
+            }
+        }
         fun build(context: Context): ArnavDatabase =
             Room.databaseBuilder(context, ArnavDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .fallbackToDestructiveMigrationOnDowngrade(true)
                 .build()
     }

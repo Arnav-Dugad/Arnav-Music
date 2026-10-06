@@ -192,3 +192,35 @@ data class ImportHistoryEntity(
     val createdAt: Long,
     val undone: Boolean = false,
 )
+
+/**
+ * Corrected metadata for an on-device song (auto-tagged from MusicBrainz or edited by the user).
+ * Applied on top of MediaStore when listing local music; the audio file itself is never modified.
+ */
+@Entity(tableName = "tag_overrides")
+data class TagOverrideEntity(
+    @PrimaryKey val trackId: String,
+    val title: String?,
+    val artist: String?,
+    val album: String?,
+    val year: Int?,
+    /** MusicBrainz recording id, when matched. */
+    val mbid: String?,
+    /** Cover Art Archive image for the release, when found. */
+    val artworkUrl: String?,
+    /** "musicbrainz" or "user". */
+    val source: String,
+    /** Match confidence 0..1 (1 for user edits). */
+    val confidence: Float,
+    val updatedAt: Long,
+)
+
+/** Explicit feedback for the recommender ("Not interested", "Never play this artist", …). */
+@Entity(tableName = "rec_feedback", indices = [Index("kind")])
+data class RecFeedbackEntity(
+    /** Track id or artist key, depending on [kind]. */
+    @PrimaryKey val subject: String,
+    /** "track_not_interested", "artist_blocked", "track_more_like_this". */
+    val kind: String,
+    val createdAt: Long,
+)

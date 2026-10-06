@@ -84,6 +84,16 @@ data class AppSettings(
     val smartTransitions: Boolean = true,
     /** Look up lyrics on LRCLIB (open community database) when a song has none on the device. */
     val onlineLyrics: Boolean = true,
+    /** Show a translation under each lyric line (on-device ML Kit, into the phone's language). */
+    val lyricsTranslation: Boolean = false,
+    /** Show a romanisation under lines written in non-Latin scripts. */
+    val lyricsRomanization: Boolean = false,
+    /** Fill in missing artist/album/cover for songs on this phone from MusicBrainz (Wi-Fi). */
+    val autoTagLocal: Boolean = true,
+    /** Widgets follow the wallpaper colours (Material You) instead of the dark glass style. */
+    val widgetMaterialYou: Boolean = true,
+    /** When the queue ends, keep playing similar songs picked by the recommender. */
+    val endlessRadio: Boolean = true,
 )
 
 class SettingsRepository(private val context: Context, scope: CoroutineScope) {
@@ -132,6 +142,11 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
         val miniLyrics = booleanPreferencesKey("mini_player_lyrics")
         val smartTransitions = booleanPreferencesKey("smart_transitions")
         val onlineLyrics = booleanPreferencesKey("online_lyrics")
+        val lyricsTranslation = booleanPreferencesKey("lyrics_translation")
+        val lyricsRomanization = booleanPreferencesKey("lyrics_romanization")
+        val autoTagLocal = booleanPreferencesKey("auto_tag_local")
+        val widgetMaterialYou = booleanPreferencesKey("widget_material_you")
+        val endlessRadio = booleanPreferencesKey("endless_radio")
     }
 
     private inline fun <reified E : Enum<E>> Preferences.enum(key: Preferences.Key<String>, default: E): E =
@@ -188,6 +203,11 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
                 miniPlayerLyrics = p[K.miniLyrics] ?: d.miniPlayerLyrics,
                 smartTransitions = p[K.smartTransitions] ?: d.smartTransitions,
                 onlineLyrics = p[K.onlineLyrics] ?: d.onlineLyrics,
+                lyricsTranslation = p[K.lyricsTranslation] ?: d.lyricsTranslation,
+                lyricsRomanization = p[K.lyricsRomanization] ?: d.lyricsRomanization,
+                autoTagLocal = p[K.autoTagLocal] ?: d.autoTagLocal,
+                widgetMaterialYou = p[K.widgetMaterialYou] ?: d.widgetMaterialYou,
+                endlessRadio = p[K.endlessRadio] ?: d.endlessRadio,
             )
         }
         .onEach { _loaded.value = true }
@@ -238,6 +258,11 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
             p[K.miniLyrics] = s.miniPlayerLyrics
             p[K.smartTransitions] = s.smartTransitions
             p[K.onlineLyrics] = s.onlineLyrics
+            p[K.lyricsTranslation] = s.lyricsTranslation
+            p[K.lyricsRomanization] = s.lyricsRomanization
+            p[K.autoTagLocal] = s.autoTagLocal
+            p[K.widgetMaterialYou] = s.widgetMaterialYou
+            p[K.endlessRadio] = s.endlessRadio
         }
     }
 

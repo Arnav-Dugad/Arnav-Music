@@ -184,3 +184,20 @@ interface ImportHistoryDao {
 }
 
 data class PlayStatsRow(val plays: Int, val firstPlayed: Long?, val lastPlayed: Long?)
+
+@Dao
+interface TagOverrideDao {
+    @Upsert suspend fun upsert(item: TagOverrideEntity)
+    @Query("SELECT * FROM tag_overrides") fun observeAll(): Flow<List<TagOverrideEntity>>
+    @Query("SELECT * FROM tag_overrides") suspend fun all(): List<TagOverrideEntity>
+    @Query("SELECT * FROM tag_overrides WHERE trackId = :trackId") suspend fun get(trackId: String): TagOverrideEntity?
+    @Query("DELETE FROM tag_overrides WHERE trackId = :trackId") suspend fun delete(trackId: String)
+}
+
+@Dao
+interface RecFeedbackDao {
+    @Upsert suspend fun upsert(item: RecFeedbackEntity)
+    @Query("SELECT * FROM rec_feedback") fun observeAll(): Flow<List<RecFeedbackEntity>>
+    @Query("SELECT * FROM rec_feedback") suspend fun all(): List<RecFeedbackEntity>
+    @Query("DELETE FROM rec_feedback WHERE subject = :subject") suspend fun delete(subject: String)
+}
