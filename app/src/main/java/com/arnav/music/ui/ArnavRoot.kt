@@ -157,6 +157,7 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
     val progress by vm.progress.collectAsStateWithLifecycle()
     val liked by vm.liked.collectAsStateWithLifecycle()
     val playlists by vm.playlists.collectAsStateWithLifecycle()
+    val switching by vm.player.switchingVariant.collectAsStateWithLifecycle()
     val expand = remember { Animatable(0f) }
     var sheet by remember { mutableStateOf<SheetRequest?>(null) }
     var paletteOpen by rememberSaveable { mutableStateOf(false) }
@@ -257,7 +258,10 @@ private fun AppScaffold(vm: AppViewModel, deepLink: DeepLink?, onDeepLinkHandled
                         onMore = { sheet = SheetRequest.TrackActions(it) },
                         onSleep = { sheet = SheetRequest.Sleep },
                         onShare = navigator.share,
+                        switchVariant = vm.player::switchVariant,
+                        findAnotherUpload = vm.player::findAnotherUpload,
                     ),
+                    switchingVariant = switching,
                     queueContent = { close ->
                         QueuePanel(state, vm.player::move, vm.player::removeAt, { vm.player.skipTo(it) }, { vm.saveQueueAsPlaylist() }, close)
                     },

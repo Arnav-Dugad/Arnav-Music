@@ -39,7 +39,10 @@ enum class Engine { NONE, LOCAL, YOUTUBE }
 enum class RepeatMode { OFF, ALL, ONE }
 
 sealed interface PlaybackIssue {
-    data class Unavailable(val title: String) : PlaybackIssue
+    /** [searching] while looking for another upload; [videoId] lets the UI hand off to YouTube Music. */
+    data class Unavailable(val title: String, val videoId: String? = null, val searching: Boolean = false, val autoSkipAt: Long? = null) : PlaybackIssue
+    data class Replaced(val title: String, val variant: com.arnav.music.domain.model.MediaVariant?) : PlaybackIssue
+    data class VariantNotFound(val want: com.arnav.music.domain.model.MediaVariant) : PlaybackIssue
     data object YouTubePausedInBackground : PlaybackIssue
     data object NetworkLost : PlaybackIssue
     data object NeedsNotificationPermission : PlaybackIssue
@@ -79,7 +82,12 @@ class PlaybackController(
     private val clock: Clock,
     private val scope: CoroutineScope,
     val youtube: YouTubeEngine,
+    private val resolver: com.arnav.music.core.youtube.UploadResolver,
 ) : YouTubeEngine.Events {
+    private val _switching = MutableStateFlow(false)
+    /** True while looking for the other (song/video) upload of the current track. */
+    val switchingVariant: StateFlow<Boolean> = _switching.asStateFlow()
+    private val triedUploads = HashMap<Long, MutableSet<String>>()
     private val _state = MutableStateFlow(PlayerState())
     val state: StateFlow<PlayerState> = _state.asStateFlow()
     private val _progress = MutableStateFlow(Progress())
@@ -407,9 +415,68 @@ class PlaybackController(
     }
 
     override fun onYtError(error: PlayerConstants.PlayerError) {
-        val title = _state.value.current?.title ?: "This video"
-        _state.update { it.copy(issue = PlaybackIssue.Unavailable(title), isPlaying = false, isBuffering = false) }
-        scope.launch { delay(1_800); if (_state.value.issue is PlaybackIssue.Unavailable) next() }
+        val item = _state.value.queue.current ?: return
+        val title = item.track.title
+        val tried = triedUploads.getOrPut(item.uid) { mutableSetOf() }.apply { add(item.track.playbackRef) }
+        // Embedding disabled / removed: quietly try another upload of the same song first.
+        if (settings.settings.value.autoReplaceUnavailable && tried.size <= 2) {
+            _state.update { it.copy(issue = PlaybackIssue.Unavailable(title, item.track.playbackRef, searching = true), isPlaying = false, isBuffering = true) }
+            scope.launch { if (!replaceCurrent(preferredVariant(), tried, announce = true)) markUnavailable(title, item.track.playbackRef) }
+        } else markUnavailable(title, item.track.playbackRef)
+    }
+
+    private fun markUnavailable(title: String, videoId: String?) {
+        val skipAt = clock.now() + 6_000
+        _state.update { it.copy(issue = PlaybackIssue.Unavailable(title, videoId, searching = false, autoSkipAt = skipAt), isPlaying = false, isBuffering = false) }
+        scope.launch {
+            delay(6_000)
+            val i = _state.value.issue
+            if (i is PlaybackIssue.Unavailable && i.autoSkipAt == skipAt) next()
+        }
+    }
+
+    private fun preferredVariant() =
+        if (settings.settings.value.preferVideos) com.arnav.music.domain.model.MediaVariant.VIDEO else com.arnav.music.domain.model.MediaVariant.SONG
+
+    /** "Find another upload" from the error card. */
+    fun findAnotherUpload() {
+        val item = _state.value.queue.current ?: return
+        val tried = triedUploads.getOrPut(item.uid) { mutableSetOf() }.apply { add(item.track.playbackRef) }
+        _state.update { it.copy(issue = PlaybackIssue.Unavailable(item.track.title, item.track.playbackRef, searching = true)) }
+        scope.launch { if (!replaceCurrent(null, tried, announce = true)) markUnavailable(item.track.title, item.track.playbackRef) }
+    }
+
+    /** YouTube Music-style Song/Video switch: swaps to the other upload and keeps the position. */
+    fun switchVariant(want: com.arnav.music.domain.model.MediaVariant) {
+        val item = _state.value.queue.current ?: return
+        if (item.track.source != SourceType.YOUTUBE || _switching.value) return
+        if (item.track.variant == want) return
+        _switching.value = true
+        scope.launch {
+            val ok = replaceCurrent(want, setOf(item.track.playbackRef), announce = false, keepPosition = true)
+            _switching.value = false
+            if (!ok) _state.update { it.copy(issue = PlaybackIssue.VariantNotFound(want)) }
+        }
+    }
+
+    private suspend fun replaceCurrent(
+        want: com.arnav.music.domain.model.MediaVariant?,
+        exclude: Set<String>,
+        announce: Boolean,
+        keepPosition: Boolean = false,
+    ): Boolean {
+        val item = _state.value.queue.current ?: return false
+        val alt = runCatching { resolver.alternative(item.track, want, exclude) }.getOrNull() ?: return false
+        if (_state.value.queue.current?.uid != item.uid) return false
+        val position = if (keepPosition) _progress.value.positionMs else 0L
+        library.remember(listOf(alt))
+        _state.update { s -> s.copy(queue = s.queue.replaceAt(s.queue.currentIndex, alt), issue = if (announce) PlaybackIssue.Replaced(alt.title, alt.variant) else null) }
+        persistQueue()
+        sessionTrack = alt
+        _progress.value = Progress(position, alt.durationMs ?: 0)
+        youtube.load(alt.playbackRef, position / 1000f, autoplay = true)
+        if (announce) scope.launch { delay(3_500); if (_state.value.issue is PlaybackIssue.Replaced) _state.update { it.copy(issue = null) } }
+        return true
     }
     // endregion
 

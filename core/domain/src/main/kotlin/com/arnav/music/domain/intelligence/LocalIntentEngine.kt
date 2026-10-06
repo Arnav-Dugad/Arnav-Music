@@ -112,8 +112,9 @@ object LocalIntentEngine {
             seedArtists.forEach { add(it) }
             val moodWords = wanted.take(2).joinToString(" ") { it.label.lowercase() }
             val ctx = context?.let { " $it" }.orEmpty()
-            if (moodWords.isNotBlank() || ctx.isNotBlank()) add("${moodWords}${ctx} music".trim())
-            if (isEmpty()) add("popular music mix")
+            // "songs" (not "music"): generic "… music" queries mostly return mixes and compilations.
+            if (moodWords.isNotBlank() || ctx.isNotBlank()) add("${moodWords}${ctx} songs".trim())
+            if (isEmpty()) add("popular songs")
         }
 
         val title = buildTitle(wanted, context, curve, rediscover)

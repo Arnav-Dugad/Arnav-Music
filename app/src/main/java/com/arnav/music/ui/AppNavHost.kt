@@ -74,7 +74,8 @@ fun AppNavHost(nav: NavHostController) {
         composable(Routes.TIMELINE) { TimelineScreen() }
         composable(Routes.PROFILE) { ProfileScreen() }
         composable(Routes.AUTH) { AuthScreen() }
-        composable(Routes.SETTINGS, arguments = listOf(navArgument("page") { type = NavType.StringType; defaultValue = "" })) {
+        composable(Routes.SETTINGS) { SettingsScreen(page = "") }
+        composable(Routes.SETTINGS_PAGE, arguments = listOf(navArgument("page") { type = NavType.StringType })) {
             SettingsScreen(page = it.arguments?.getString("page").orEmpty())
         }
     }

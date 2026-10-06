@@ -70,23 +70,45 @@ object Formatters {
         RegexOption.IGNORE_CASE,
     )
 
+    data class ParsedTitle(val artist: String, val title: String, val album: String?, val credits: String?)
+
+    private val segmentNoise = Regex(
+        """(#|\b(songs?|music|video|lyric(al|s)?|latest|new|hits|telugu|hindi|tamil|kannada|malayalam|punjabi|marathi|bengali|bollywood|tollywood|kollywood|full|hd|4k|official|trending|audio|jukebox|(19|20)\d\d)\b)""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val movieWords = Regex("""\s*\b(movie|film|songs?|ost)\b\s*""", RegexOption.IGNORE_CASE)
+
+    /** Cleans YouTube titles into (artist, title). See [parseYouTubeTitle]. */
+    fun splitYouTubeTitle(raw: String, channel: String): Pair<String, String> =
+        parseYouTubeTitle(raw, channel).let { it.artist to it.title }
+
     /**
-     * Cleans YouTube titles into (artist, title):
-     * "Daft Punk - Get Lucky (Official Video) [4K]" → (Daft Punk, Get Lucky)
-     * "Narayanamma Lyric Video I Aadarsha Kutumbam I Venkatesh" (label channel) → (channel, Narayanamma)
+     * "Daft Punk - Get Lucky (Official Video) [4K]" → artist Daft Punk, title Get Lucky.
+     * Label uploads chain context: "Narayanamma Lyric Video I Aadarsha Kutumbam I Venkatesh, Shriya"
+     * → title Narayanamma, album Aadarsha Kutumbam, credits Venkatesh, Shriya (artist = channel).
      */
-    fun splitYouTubeTitle(raw: String, channel: String): Pair<String, String> {
+    fun parseYouTubeTitle(raw: String, channel: String): ParsedTitle {
         val noBrackets = raw.replace(bracketNoise, "").replace(Regex("""\s+"""), " ").trim()
-        // Label uploads chain context with " | " or " I " — the song is the first segment.
-        var first = noBrackets.split(segmentSeparators).firstOrNull()?.trim().orEmpty().ifBlank { noBrackets }
-        if (capitalISeparator.findAll(first).count() >= 2) first = first.split(capitalISeparator).first().trim()
-        var cleaned = first
-        repeat(2) { cleaned = cleaned.replace(trailingNoise, "").trim() }
-        if (cleaned.isBlank()) cleaned = first
+        var segments = noBrackets.split(segmentSeparators).map { it.trim() }.filter { it.isNotEmpty() }
+        if (segments.size == 1 && capitalISeparator.findAll(segments[0]).count() >= 2) segments = segments[0].split(capitalISeparator).map { it.trim() }.filter { it.isNotEmpty() }
+        if (segments.isEmpty()) segments = listOf(noBrackets.ifBlank { raw })
+
+        fun clean(s: String): String { var c = s; repeat(2) { c = c.replace(trailingNoise, "").trim() }; return c }
+        // The song is the first segment that survives noise removal ("Music Video | Song Name").
+        var titleIndex = segments.indexOfFirst { clean(it).isNotBlank() }
+        if (titleIndex < 0) titleIndex = 0
+        val cleaned = clean(segments[titleIndex]).ifBlank { segments[titleIndex] }
+        val extras = segments.drop(titleIndex + 1).filter { !segmentNoise.containsMatchIn(it) || movieWords.containsMatchIn(it) && it.split(' ').size <= 5 }
+            .map { it.replace(movieWords, " ").replace(Regex("""\s+"""), " ").trim() }
+            .filter { it.length in 2..60 && !segmentNoise.containsMatchIn(it) }
+
         val parts = cleaned.split(" - ", " – ", " — ", limit = 2)
         val artistFromChannel = channel.replace(Regex("""\s*-\s*Topic$""", RegexOption.IGNORE_CASE), "").replace(Regex("""VEVO$"""), "").trim()
-        return if (parts.size == 2 && parts[0].length in 1..60 && parts[1].isNotBlank()) parts[0].trim() to parts[1].trim()
+        val (artist, title) = if (parts.size == 2 && parts[0].length in 1..60 && parts[1].isNotBlank()) parts[0].trim() to parts[1].trim()
         else artistFromChannel.ifBlank { "Unknown artist" } to cleaned.ifBlank { raw }
+        val album = extras.firstOrNull { !it.contains(',') }
+        val credits = extras.firstOrNull { it != album && (it.contains(',') || it.split(' ').size <= 4) }
+        return ParsedTitle(artist, title, album, credits)
     }
 
     /** Human-readable byte sizes: 950 B, 12.4 KB, 6.1 MB, 1.20 GB. */

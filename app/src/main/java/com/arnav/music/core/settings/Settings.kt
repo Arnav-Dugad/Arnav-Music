@@ -66,6 +66,10 @@ data class AppSettings(
     val autoUpdate: Boolean = true,
     val updateWifiOnly: Boolean = true,
     val autoInstallUpdates: Boolean = true,
+    /** YouTube Music-style default: play the song (audio/art-track upload) unless videos are preferred. */
+    val preferVideos: Boolean = false,
+    /** Replace unplayable YouTube uploads with another upload of the same song automatically. */
+    val autoReplaceUnavailable: Boolean = true,
 )
 
 class SettingsRepository(private val context: Context, scope: CoroutineScope) {
@@ -105,6 +109,8 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
         val autoUpdate = booleanPreferencesKey("auto_update")
         val updateWifiOnly = booleanPreferencesKey("update_wifi_only")
         val autoInstall = booleanPreferencesKey("auto_install_updates")
+        val preferVideos = booleanPreferencesKey("prefer_videos")
+        val autoReplace = booleanPreferencesKey("auto_replace_unavailable")
     }
 
     private inline fun <reified E : Enum<E>> Preferences.enum(key: Preferences.Key<String>, default: E): E =
@@ -152,6 +158,8 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
                 autoUpdate = p[K.autoUpdate] ?: d.autoUpdate,
                 updateWifiOnly = p[K.updateWifiOnly] ?: d.updateWifiOnly,
                 autoInstallUpdates = p[K.autoInstall] ?: d.autoInstallUpdates,
+                preferVideos = p[K.preferVideos] ?: d.preferVideos,
+                autoReplaceUnavailable = p[K.autoReplace] ?: d.autoReplaceUnavailable,
             )
         }
         .onEach { _loaded.value = true }
@@ -193,6 +201,8 @@ class SettingsRepository(private val context: Context, scope: CoroutineScope) {
             p[K.autoUpdate] = s.autoUpdate
             p[K.updateWifiOnly] = s.updateWifiOnly
             p[K.autoInstall] = s.autoInstallUpdates
+            p[K.preferVideos] = s.preferVideos
+            p[K.autoReplace] = s.autoReplaceUnavailable
         }
     }
 

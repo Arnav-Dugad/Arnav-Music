@@ -104,6 +104,9 @@ class CoreLogicTest {
         assertEquals(q.current, restored.current)
         assertEquals(q.items.size, restored.items.size)
         assertEquals(-1, QueueState().replace(emptyList()).currentIndex)
+        val swapped = q.replaceAt(q.currentIndex, track(500))
+        assertEquals("Song 500", swapped.current!!.track.title)
+        assertEquals(q.current!!.uid, swapped.current!!.uid)
         assertEquals(QueueState().move(0, 1), QueueState())
     }
 

@@ -139,6 +139,8 @@ fun TrackActionsSheet(
                 listOfNotNull(
                     "Source" to if (track.source == SourceType.YOUTUBE) "YouTube (embedded player)" else "This device",
                     track.album?.let { "Album" to it },
+                    track.credits?.let { "Credits" to it },
+                    track.variant?.let { "Upload" to if (it == com.arnav.music.domain.model.MediaVariant.SONG) "Song (audio)" else "Music video" },
                     track.durationMs?.let { "Length" to Formatters.duration(it) },
                     track.year?.let { "Year" to it.toString() },
                     track.genres.takeIf { it.isNotEmpty() }?.let { "Style hints" to it.joinToString() },

@@ -92,12 +92,16 @@ val appModule = module {
         )
     }
     single { LibraryRepository(get(), get(), get(), get(), get()) }
-    single { SearchRepository(get(), get(), get<ArnavDatabase>().search(), get(), get()) }
+    single {
+        val settings: SettingsRepository = get()
+        SearchRepository(get(), get(), get<ArnavDatabase>().search(), get(), get(), preferVideos = { settings.settings.value.preferVideos })
+    }
     single { AiGateway(get(), get(), get(), get<ArnavDatabase>().aiCache(), get(), get()) }
     single { IntelligenceRepository(get(), get(), get(), get(), get(), get()) }
     single { YouTubeEngine() }
     single { com.arnav.music.core.update.UpdateManager(androidContext(), get(), get()) }
-    single { PlaybackController(androidContext(), get(), get(), get(), get(), get()) }
+    single { com.arnav.music.core.youtube.UploadResolver(get()) }
+    single { PlaybackController(androidContext(), get(), get(), get(), get(), get(), get()) }
 
     viewModel { AppViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     viewModel { AuthViewModel(get(), get()) }

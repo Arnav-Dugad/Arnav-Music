@@ -9,13 +9,16 @@ import kotlinx.serialization.json.Json
 
 /** Versioned prompts. Bumping a version invalidates cached AI answers made with the old one. */
 object PromptLibrary {
-    const val SESSION_VERSION = "session-v3"
+    const val SESSION_VERSION = "session-v4"
     const val EXPLAIN_VERSION = "explain-v1"
 
     fun sessionPrompt(request: String, topArtists: List<String>, topGenres: List<String>, hourOfDay: Int): String = """
         You are Arnav AI, the music intelligence inside the Arnav Music app.
         Convert the listener's request into listening-session constraints. Do NOT invent song titles.
-        Only produce search phrases that would find matching music on YouTube.
+        seedArtists: 3-5 real, well-known artists whose individual songs fit the request and the listener's taste
+        (mix in the listener's artists when it fits; match their language/region when obvious).
+        searchQueries: 2-4 short phrases that find SINGLE songs on YouTube, e.g. "<artist> songs" or "<genre> <mood> song".
+        Never use the words mix, playlist, mashup, jukebox, compilation, nonstop or hour.
         Listener context (opt-in, approximate): top artists=${topArtists.take(8).joinToString()}; top genres=${topGenres.take(5).joinToString()}; local hour=$hourOfDay.
         Request: "${request.take(300).replace("\"", "'")}"
         Respond ONLY with JSON matching:

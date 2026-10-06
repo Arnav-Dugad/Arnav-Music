@@ -257,12 +257,25 @@ private fun SessionHeader(prompt: String, result: SessionResult, onRegenerate: (
         }
         if (result.aiUnavailable != null && result.aiUnavailable != AiUnavailableReason.DISABLED_BY_USER) {
             Spacer(Modifier.height(Space.m))
-            Text("Arnav AI answered on-device this time — no cloud quota was used.", style = ArnavTheme.type.caption, color = c.contentSubtle)
+            Text("Answered on-device — " + fallbackReason(result.aiUnavailable), style = ArnavTheme.type.caption, color = c.contentSubtle)
         }
         if (result.searchedRemotely > 0) {
             Text("Used ${result.searchedRemotely} YouTube ${if (result.searchedRemotely == 1) "search" else "searches"} to find playable songs.", style = ArnavTheme.type.caption, color = c.contentSubtle)
         }
     }
+}
+
+private fun fallbackReason(r: AiUnavailableReason): String = when (r) {
+    AiUnavailableReason.APP_CHECK -> "Gemini rejected this install's App Check token. Set AI Logic to Unenforced in Firebase App Check to allow GitHub installs."
+    AiUnavailableReason.NOT_CONFIGURED -> "cloud AI isn't configured in this build."
+    AiUnavailableReason.DAILY_LIMIT -> "you've reached today's AI limit (Settings → Arnav AI)."
+    AiUnavailableReason.QUOTA -> "the free Gemini quota is used up for now."
+    AiUnavailableReason.THROTTLED -> "requests are spaced a few seconds apart to protect the free tier."
+    AiUnavailableReason.OFFLINE -> "Gemini couldn't be reached (offline)."
+    AiUnavailableReason.TIMEOUT -> "Gemini took too long to answer."
+    AiUnavailableReason.MALFORMED -> "Gemini's answer couldn't be understood, so the local engine stepped in."
+    AiUnavailableReason.ERROR -> "Gemini returned an error (see Settings → Usage)."
+    AiUnavailableReason.DISABLED_BY_USER -> "cloud AI is turned off."
 }
 
 @Composable

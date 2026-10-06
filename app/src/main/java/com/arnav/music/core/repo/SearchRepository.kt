@@ -6,6 +6,7 @@ import com.arnav.music.core.db.RecentSearchEntity
 import com.arnav.music.core.db.SearchDao
 import com.arnav.music.core.youtube.YouTubeRepository
 import com.arnav.music.domain.model.Track
+import com.arnav.music.domain.catalog.isSingle
 import com.arnav.music.domain.provider.MusicError
 import com.arnav.music.domain.provider.SearchFilter
 import com.arnav.music.domain.provider.SearchResults
@@ -32,7 +33,21 @@ class SearchRepository(
     private val searchDao: SearchDao,
     private val network: NetworkMonitor,
     private val clock: Clock,
+    private val preferVideos: () -> Boolean = { false },
 ) {
+    /** Songs filter = singles only, audio uploads first; Videos = music videos first; All = mixes last. */
+    private fun shape(r: SearchResults, filter: SearchFilter): SearchResults {
+        val prefer = if (filter == SearchFilter.VIDEOS || (filter == SearchFilter.ALL && preferVideos())) com.arnav.music.domain.model.MediaVariant.VIDEO
+        else com.arnav.music.domain.model.MediaVariant.SONG
+        val ranked = com.arnav.music.domain.catalog.rankForListening(r.tracks, prefer)
+        val tracks = when (filter) {
+            SearchFilter.TRACKS -> ranked.filter { it.isSingle() }
+            SearchFilter.VIDEOS -> ranked.filter { it.variant != com.arnav.music.domain.model.MediaVariant.SONG }
+            else -> ranked
+        }
+        return r.copy(tracks = tracks)
+    }
+
     val recent: Flow<List<String>> = searchDao.recent().map { l -> l.map { it.display } }
 
     suspend fun localMatches(query: String): List<Track> {
@@ -52,7 +67,7 @@ class SearchRepository(
         val local = localMatches(query)
         emit(SearchState.Instant(query, local))
         val cached = youtube.cached(query, filter)
-        if (cached != null) emit(SearchState.Results(cached, local, refreshing = remote && youtube.shouldRevalidate(cached)))
+        if (cached != null) emit(SearchState.Results(shape(cached, filter), local, refreshing = remote && youtube.shouldRevalidate(cached)))
         if (!remote || !QueryNormalizer.isRemoteWorthy(query)) return@flow
         if (cached != null && !youtube.shouldRevalidate(cached)) return@flow
         if (!network.currentlyOnline()) {
@@ -61,13 +76,13 @@ class SearchRepository(
         }
         if (cached == null) emit(SearchState.Loading(query, local))
         youtube.search(query, filter, null)
-            .onSuccess { emit(SearchState.Results(it, local)) }
+            .onSuccess { emit(SearchState.Results(shape(it, filter), local)) }
             .onFailure { e -> if (cached == null) emit(SearchState.Failed(query, e as? MusicError ?: MusicError.Unknown(e.javaClass.simpleName), local)) }
     }
 
     suspend fun nextPage(results: SearchResults, filter: SearchFilter): Result<SearchResults> {
         val token = results.nextPageToken ?: return Result.success(results)
-        return youtube.search(results.query, filter, token).map { page ->
+        return youtube.search(results.query, filter, token).map { shape(it, filter) }.map { page ->
             page.copy(tracks = (results.tracks + page.tracks).distinctBy { it.id }, artists = (results.artists + page.artists).distinctBy { it.key }, playlists = (results.playlists + page.playlists).distinctBy { it.id })
         }
     }

@@ -6,6 +6,10 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class SourceType { YOUTUBE, LOCAL }
 
+/** Like YouTube Music's Song/Video switch: SONG = audio or art-track upload, VIDEO = music/lyric video. */
+@Serializable
+enum class MediaVariant { SONG, VIDEO }
+
 /**
  * Stable cross-source id. Format: "<source>:<native id>", e.g. "yt:dQw4w9WgXcQ" or "local:1234".
  */
@@ -40,6 +44,11 @@ data class Track(
     /** Estimated 0..1 energy. Null when unknown — never fabricated. */
     val energy: Float? = null,
     val year: Int? = null,
+    val variant: MediaVariant? = null,
+    /** Performers/cast parsed from label titles ("Venkatesh, Shriya"). */
+    val credits: String? = null,
+    /** Mix, mashup, jukebox or long-form set — excluded from recommendations. */
+    val compilation: Boolean = false,
 ) {
     val source: SourceType get() = id.source
     val artistKey: String get() = ArtistKey.of(artist)

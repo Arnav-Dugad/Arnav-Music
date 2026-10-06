@@ -21,17 +21,23 @@ data class TrackEntity(
     val energy: Float?,
     val year: Int?,
     val updatedAt: Long,
+    val variant: String? = null,
+    val credits: String? = null,
+    @androidx.room.ColumnInfo(defaultValue = "0") val compilation: Boolean = false,
 ) {
     fun toDomain() = Track(
         id = TrackId(id), title = title, artist = artist, album = album, durationMs = durationMs,
         artworkUrl = artworkUrl, playbackRef = playbackRef, channelId = channelId,
         genres = if (genres.isBlank()) emptyList() else genres.split('|'), energy = energy, year = year,
+        variant = variant?.let { v -> com.arnav.music.domain.model.MediaVariant.entries.firstOrNull { it.name == v } },
+        credits = credits,
+        compilation = compilation,
     )
 
     companion object {
         fun from(t: Track, now: Long) = TrackEntity(
             t.id.value, t.title, t.artist, t.artistKey, t.album, t.durationMs, t.artworkUrl, t.playbackRef,
-            t.channelId, t.genres.joinToString("|"), t.energy, t.year, now,
+            t.channelId, t.genres.joinToString("|"), t.energy, t.year, now, t.variant?.name, t.credits, t.compilation,
         )
     }
 }

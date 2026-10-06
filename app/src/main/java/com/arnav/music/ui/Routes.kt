@@ -16,7 +16,8 @@ object Routes {
     const val CONSTELLATION = "constellation"
     const val TIMELINE = "timeline"
     const val PROFILE = "profile"
-    const val SETTINGS = "settings?page={page}"
+    const val SETTINGS = "settings"
+    const val SETTINGS_PAGE = "settings/{page}"
     const val AUTH = "auth"
 
     fun ai(q: String? = null) = "ai?q=" + Uri.encode(q.orEmpty())
@@ -24,7 +25,8 @@ object Routes {
     fun collection(kind: CollectionKind, id: String = "_") = "collection/${kind.name}/${Uri.encode(id)}"
     fun artist(name: String) = "artist/" + Uri.encode(name)
     fun moment(id: String) = "moment/$id"
-    fun settings(page: String? = null) = "settings?page=" + Uri.encode(page.orEmpty())
+    /** Root and sub-pages are distinct destinations so each sub-page stacks on top of Settings. */
+    fun settings(page: String? = null) = if (page.isNullOrBlank()) SETTINGS else "settings/" + Uri.encode(page)
 
     val topLevel = listOf(HOME, EXPLORE, LIBRARY, AI)
 }

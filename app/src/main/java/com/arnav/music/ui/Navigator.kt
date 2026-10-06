@@ -16,7 +16,20 @@ class Navigator(
     val openPalette: () -> Unit,
     val share: (Track) -> Unit,
 ) {
-    fun go(route: String) = nav.navigate(route) { launchSingleTop = true }
+    private var lastRoute: String? = null
+    private var lastAt = 0L
+
+    /**
+     * Pushes a screen. Not single-top: same-pattern routes with different arguments (artist → artist,
+     * settings → settings/appearance) must stack so Back returns to the previous one. Rapid
+     * double-taps on the same target are ignored instead.
+     */
+    fun go(route: String) {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (route == lastRoute && now - lastAt < 600) return
+        lastRoute = route; lastAt = now
+        nav.navigate(route)
+    }
     fun back() { if (!nav.popBackStack()) Unit }
     fun topLevel(route: String) = nav.navigate(route) {
         popUpTo(nav.graph.findStartDestination().id) { saveState = true }

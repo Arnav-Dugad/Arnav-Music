@@ -131,7 +131,7 @@ fun SearchScreen(initialQuery: String, vm: ExploreViewModel = koinViewModel()) {
         }
         LazyRow(contentPadding = PaddingValues(horizontal = Space.gutter, vertical = Space.m), horizontalArrangement = Arrangement.spacedBy(Space.s)) {
             items(SearchFilter.entries) { f ->
-                Pill(when (f) { SearchFilter.ALL -> "All"; SearchFilter.TRACKS -> "Songs"; SearchFilter.ARTISTS -> "Artists"; SearchFilter.PLAYLISTS -> "Playlists" }, f == filter, { vm.filter.value = f })
+                Pill(when (f) { SearchFilter.ALL -> "All"; SearchFilter.TRACKS -> "Songs"; SearchFilter.VIDEOS -> "Videos"; SearchFilter.ARTISTS -> "Artists"; SearchFilter.PLAYLISTS -> "Playlists" }, f == filter, { vm.filter.value = f })
             }
         }
         val playingId = current.current?.id

@@ -21,6 +21,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -131,6 +132,8 @@ class PlayerActions(
     val onMore: (Track) -> Unit,
     val onSleep: () -> Unit,
     val onShare: (Track) -> Unit,
+    val switchVariant: (com.arnav.music.domain.model.MediaVariant) -> Unit = {},
+    val findAnotherUpload: () -> Unit = {},
 )
 
 /**
@@ -151,6 +154,7 @@ fun PlayerLayer(
     contentLeftPx: Float,
     wide: Boolean,
     actions: PlayerActions,
+    switchingVariant: Boolean = false,
     queueContent: @Composable (onClose: () -> Unit) -> Unit,
 ) {
     val track = state.current ?: return
@@ -244,6 +248,7 @@ fun PlayerLayer(
                     track = track, state = state, progress = progress, palette = palette, liked = liked,
                     artSpace = with(density) { fullH.toDp() }, artTopPx = fullTop, wide = wide, immersive = immersive,
                     onCollapse = { animateTo(0f) }, actions = actions, onQueue = { queueOpen = true },
+                    switchingVariant = switchingVariant,
                 )
             }
         }
@@ -456,6 +461,7 @@ private fun NowPlayingContent(
     onCollapse: () -> Unit,
     actions: PlayerActions,
     onQueue: () -> Unit,
+    switchingVariant: Boolean = false,
 ) {
     val on = Color(palette.onBackdrop)
     val muted = Color(palette.onBackdropMuted)
@@ -472,8 +478,12 @@ private fun NowPlayingContent(
         Row(Modifier.fillMaxWidth().padding(horizontal = Space.s), verticalAlignment = Alignment.CenterVertically) {
             ArnavIconButton(Icons.Rounded.KeyboardArrowDown, "Collapse player", onCollapse, tint = on)
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("NOW PLAYING", style = ArnavTheme.type.overline, color = muted)
-                Text(if (track.source == SourceType.YOUTUBE) "via YouTube" else track.album ?: "On this device", style = ArnavTheme.type.caption, color = on, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (track.source == SourceType.YOUTUBE) {
+                    VariantSwitch(track.variant, switchingVariant, on, muted, Color(palette.accent), actions.switchVariant)
+                } else {
+                    Text("NOW PLAYING", style = ArnavTheme.type.overline, color = muted)
+                    Text(track.album ?: "On this device", style = ArnavTheme.type.caption, color = on, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
             ArnavIconButton(Icons.Rounded.MoreHoriz, "More actions", { actions.onMore(track) }, tint = on)
         }
@@ -511,7 +521,7 @@ private fun NowPlayingContent(
         }
     }
     state.issue?.let { issue ->
-        IssueToast(issue, actions.dismissIssue)
+        IssueToast(issue, actions)
     }
 }
 
@@ -540,6 +550,10 @@ private fun MetaAndControls(
                 Spacer(Modifier.height(2.dp))
                 Text(t.artist, style = ArnavTheme.type.body, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { actions.openArtist(t.artist) })
+                val context = listOfNotNull(t.album, t.credits).joinToString(" · ")
+                if (context.isNotBlank() && t.source == SourceType.YOUTUBE) {
+                    Text(context, style = ArnavTheme.type.caption, color = muted.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
         HeartButton(liked, { actions.toggleLike(track) }, size = 26.dp, tint = on)
@@ -638,19 +652,88 @@ private fun openOutputSwitcher(context: android.content.Context) {
 }
 
 @Composable
-private fun IssueToast(issue: PlaybackIssue, onDismiss: () -> Unit) {
+private fun IssueToast(issue: PlaybackIssue, actions: PlayerActions) {
+    val c = ArnavTheme.colors
+    val context = LocalContext.current
     val text = when (issue) {
-        is PlaybackIssue.Unavailable -> "“${issue.title.take(40)}” isn't available here. Skipping…"
+        is PlaybackIssue.Unavailable ->
+            if (issue.searching) "“${issue.title.take(40)}” can't play in Arnav Music. Looking for another upload…"
+            else "“${issue.title.take(40)}” can't be played outside YouTube. Skipping in a few seconds."
+        is PlaybackIssue.Replaced -> "Playing another upload of “${issue.title.take(40)}”" + when (issue.variant) {
+            com.arnav.music.domain.model.MediaVariant.SONG -> " (official audio)."
+            com.arnav.music.domain.model.MediaVariant.VIDEO -> " (video)."
+            null -> "."
+        }
+        is PlaybackIssue.VariantNotFound -> if (issue.want == com.arnav.music.domain.model.MediaVariant.SONG) "No official audio upload found for this song." else "No music video found for this song."
         PlaybackIssue.YouTubePausedInBackground -> "Paused — YouTube can't play while Arnav Music is in the background."
         PlaybackIssue.NetworkLost -> "Connection lost. Playback will resume when you're back online."
         PlaybackIssue.NeedsNotificationPermission -> "Allow notifications to control local playback from the lock screen."
     }
     Box(Modifier.fillMaxSize().padding(bottom = 120.dp, start = Space.gutter, end = Space.gutter), contentAlignment = Alignment.BottomCenter) {
-        Row(
-            Modifier.widthIn(max = 520.dp).glass(GlassMaterial.Elevated, RoundedCornerShape(Radius.m)).clickable(onClick = onDismiss).padding(Space.m),
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
+            Modifier.widthIn(max = 520.dp).fillMaxWidth().glass(GlassMaterial.Elevated, RoundedCornerShape(Radius.l)).clickable(onClick = actions.dismissIssue).padding(Space.l),
         ) {
-            Text(text, style = ArnavTheme.type.bodySmall, color = ArnavTheme.colors.content, modifier = Modifier.weight(1f, fill = false))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (issue is PlaybackIssue.Unavailable && issue.searching) {
+                    androidx.compose.material3.CircularProgressIndicator(Modifier.size(16.dp), color = c.accent, strokeWidth = 2.dp)
+                    Spacer(Modifier.width(Space.m))
+                }
+                Text(text, style = ArnavTheme.type.bodySmall, color = c.content, modifier = Modifier.weight(1f))
+            }
+            if (issue is PlaybackIssue.Unavailable && !issue.searching) {
+                Spacer(Modifier.height(Space.m))
+                Row(horizontalArrangement = Arrangement.spacedBy(Space.s)) {
+                    IssueAction("Find another upload", c.accent) { actions.findAnotherUpload() }
+                    issue.videoId?.let { id ->
+                        IssueAction("Open in YouTube Music", c.content) {
+                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://music.youtube.com/watch?v=$id")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                        }
+                    }
+                    IssueAction("Skip", c.contentMuted) { actions.next() }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun IssueAction(label: String, color: Color, onClick: () -> Unit) {
+    Text(label, style = ArnavTheme.type.label, color = color,
+        modifier = Modifier.clip(RoundedCornerShape(Radius.s)).background(color.copy(alpha = 0.1f)).clickable(onClick = onClick).padding(horizontal = Space.m, vertical = Space.s))
+}
+
+/** YouTube Music-style Song | Video switch. The YouTube player stays visible in both modes. */
+@Composable
+private fun VariantSwitch(
+    current: com.arnav.music.domain.model.MediaVariant?,
+    busy: Boolean,
+    on: Color,
+    muted: Color,
+    accent: Color,
+    onSwitch: (com.arnav.music.domain.model.MediaVariant) -> Unit,
+) {
+    val selected = current ?: com.arnav.music.domain.model.MediaVariant.VIDEO
+    val motion = ArnavTheme.motion
+    val haptics = ArnavTheme.haptics
+    Row(
+        Modifier.clip(CircleShape).background(on.copy(alpha = 0.10f)).padding(3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        com.arnav.music.domain.model.MediaVariant.entries.forEach { v ->
+            val isSel = v == selected
+            val bg by androidx.compose.animation.animateColorAsState(if (isSel) on else Color.Transparent, motion.fast(), label = "vs")
+            Row(
+                Modifier.clip(CircleShape).background(bg)
+                    .clickable(enabled = !busy && !isSel, role = androidx.compose.ui.semantics.Role.Tab, onClickLabel = "Switch to ${v.name.lowercase()}") { haptics.select(); onSwitch(v) }
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (busy && !isSel) {
+                    androidx.compose.material3.CircularProgressIndicator(Modifier.size(12.dp), color = accent, strokeWidth = 1.5.dp)
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(if (v == com.arnav.music.domain.model.MediaVariant.SONG) "Song" else "Video", style = ArnavTheme.type.label, color = if (isSel) Color(0xFF0B0B0F).takeIf { on.red > 0.5f } ?: Color.White else muted)
+            }
         }
     }
 }

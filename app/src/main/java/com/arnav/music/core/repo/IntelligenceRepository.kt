@@ -8,6 +8,7 @@ import com.arnav.music.core.common.NetworkMonitor
 import com.arnav.music.core.settings.SettingsRepository
 import com.arnav.music.core.youtube.YouTubeRepository
 import com.arnav.music.domain.ai.AiJson
+import com.arnav.music.domain.catalog.isSingle
 import com.arnav.music.domain.ai.PromptLibrary
 import com.arnav.music.domain.format.Formatters
 import com.arnav.music.domain.intelligence.BuiltSession
@@ -137,7 +138,7 @@ class IntelligenceRepository(
         val topRecentArtist = recentEvents.groupBy { it.artistKey }.maxByOrNull { (_, v) -> v.sumOf { it.listenedMs } }?.key
         if (topRecentArtist != null) {
             val anchor = recent.firstOrNull { it.artistKey == topRecentArtist }
-            val pool = library.allKnownTracks().filter { it.artistKey != topRecentArtist }
+            val pool = library.allKnownTracks().filter { it.artistKey != topRecentArtist && it.isSingle() }
             val similar = pool.filter { t -> anchor != null && (t.genres.intersect(anchor.genres.toSet()).isNotEmpty() || (t.energy != null && anchor.energy != null && abs(t.energy!! - anchor.energy!!) < 0.12f)) }
             val ranked = recommender.rank(similar, profile, now, library.likedIds.value, anchor?.energy).take(12)
             if (anchor != null && ranked.size >= 4) out += HomeSection.TrackShelf("because", "Because you played ${anchor.artist}", "Similar energy and style", ranked.map { it.track }, ranked.associate { it.track.id to it.reason })
@@ -156,7 +157,7 @@ class IntelligenceRepository(
 
         if (network.currentlyOnline() || youtube.quotaState() != QuotaState.NORMAL) {
             youtube.trending().getOrNull()?.takeIf { it.isNotEmpty() }?.let { trending ->
-                val ranked = recommender.rank(trending, profile, now, library.likedIds.value, discovery = 0.5f)
+                val ranked = recommender.rank(trending.filter { it.isSingle() }, profile, now, library.likedIds.value, discovery = 0.5f)
                 out += HomeSection.TrackShelf("trending", "Trending in music", "From YouTube's popular music chart", ranked.map { it.track }.take(20))
             }
         }
@@ -207,6 +208,7 @@ class IntelligenceRepository(
             }
         } else aiReason = AiUnavailableReason.DISABLED_BY_USER
 
+        if (aiReason != null && aiReason != AiUnavailableReason.DISABLED_BY_USER) ai.noteFallback()
         val (candidates, searched) = resolveCandidates(constraints, profile)
         val session = builder.build(constraints, candidates, profile, library.likedIds.value, now)
         library.remember(session.tracks)
@@ -257,7 +259,13 @@ class IntelligenceRepository(
             res?.tracks?.let { fromSearch += it }
             if (fromSearch.size > 120) break
         }
-        return (fromSearch + fromKnown).filter { (it.energy ?: 0f) <= maxEnergy }.distinctBy { it.id } to remote
+        // Recommendations are singles only: no mixes, mashups, jukeboxes or hour-long sets.
+        val singles = (fromSearch + fromKnown).filter { it.isSingle() && (it.energy ?: 0f) <= maxEnergy }.distinctBy { it.id }
+        // Prefer official audio ("Topic") uploads when the same song appears more than once.
+        val prefer = if (settings.settings.value.preferVideos) com.arnav.music.domain.model.MediaVariant.VIDEO else com.arnav.music.domain.model.MediaVariant.SONG
+        val deduped = singles.groupBy { it.artistKey + "|" + it.title.lowercase().replace(Regex("""[^\p{L}\p{N}]"""), "") }
+            .values.map { group -> group.minByOrNull { if (it.variant == prefer) 0 else if (it.variant == null) 1 else 2 }!! }
+        return deduped to remote
     }
 
     fun explain(reason: Reason, track: Track): String = when (reason) {

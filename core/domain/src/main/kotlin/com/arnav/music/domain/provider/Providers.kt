@@ -18,7 +18,8 @@ interface MusicCatalogProvider {
     suspend fun tracks(ids: List<TrackId>): List<Track> = ids.mapNotNull { track(it) }
 }
 
-enum class SearchFilter { ALL, TRACKS, ARTISTS, PLAYLISTS }
+/** TRACKS = songs (singles, audio/art-track uploads preferred); VIDEOS = music videos. */
+enum class SearchFilter { ALL, TRACKS, VIDEOS, ARTISTS, PLAYLISTS }
 
 data class SearchResults(
     val query: String,

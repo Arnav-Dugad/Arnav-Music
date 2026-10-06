@@ -248,7 +248,11 @@ private fun PlaybackPage(vm: SettingsViewModel) {
                 }
             }
         }
-        SettingsGroup("YouTube", footer = "YouTube videos play in the official embedded player, which must stay visible. For background listening, continue in the YouTube Music app.") {
+        SettingsGroup("YouTube", footer = "Song plays the official audio upload (\"Topic\" art track) and Video plays the music video — switch any time in Now Playing. YouTube always plays in its official embedded player, which stays visible; for background listening continue in YouTube Music.") {
+            ToggleRow("Prefer music videos", s.preferVideos, { v -> vm.update { it.copy(preferVideos = v) } }, "Off: songs first, like YouTube Music")
+            Divider()
+            ToggleRow("Replace unplayable videos", s.autoReplaceUnavailable, { v -> vm.update { it.copy(autoReplaceUnavailable = v) } }, "If an upload can't be embedded, play another upload of the same song")
+            Divider()
             InfoRow("Background playback", "Not available (YouTube policy)")
         }
     }
@@ -272,6 +276,9 @@ private fun AiPage(vm: SettingsViewModel) {
             InfoRow("AI requests", "${usage.aiRequests} / ${s.dailyAiLimit}")
             InfoRow("Answered from cache", "${(usage.aiCacheRatio * 100).toInt()}%")
             InfoRow("On-device fallbacks", "${usage.aiFallbacks}")
+            vm.lastAiError?.let { err ->
+                Text("Last Gemini error: $err", style = ArnavTheme.type.caption, color = ArnavTheme.colors.contentSubtle, modifier = Modifier.padding(horizontal = Space.l, vertical = Space.s))
+            }
         }
         SettingsGroup { ActionRowS("Delete AI personalization", "Clears cached AI answers and turns personalization off", destructive = true) { vm.deleteAiPersonalization() } }
     }

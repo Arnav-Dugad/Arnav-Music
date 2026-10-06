@@ -62,7 +62,7 @@ class YouTubeRepository(
 
     /** Cache only, never touches the network. Used for instant results while typing. */
     suspend fun cached(query: String, filter: SearchFilter, pageToken: String? = null): SearchResults? {
-        val key = QueryNormalizer.cacheKey(query, filter.name) + (pageToken?.let { "#$it" } ?: "")
+        val key = (CACHE_VERSION + QueryNormalizer.cacheKey(query, filter.name)) + (pageToken?.let { "#$it" } ?: "")
         val hit = searchDao.get(key) ?: return null
         val page = runCatching { json.decodeFromString(CachedPage.serializer(), hit.payload) }.getOrNull() ?: return null
         return SearchResults(query, page.tracks, page.artists, page.playlists, page.nextPageToken, fromCache = true, fetchedAt = hit.fetchedAt)
@@ -71,7 +71,7 @@ class YouTubeRepository(
     fun shouldRevalidate(results: SearchResults): Boolean = CachePolicy.shouldRevalidate(results.fetchedAt, clock.now(), quotaState())
 
     override suspend fun search(query: String, filter: SearchFilter, pageToken: String?): Result<SearchResults> {
-        val key = QueryNormalizer.cacheKey(query, filter.name) + (pageToken?.let { "#$it" } ?: "")
+        val key = (CACHE_VERSION + QueryNormalizer.cacheKey(query, filter.name)) + (pageToken?.let { "#$it" } ?: "")
         val state = quotaState()
         cached(query, filter, pageToken)?.let { c ->
             if (CachePolicy.isFresh(c.fetchedAt, clock.now(), state)) {
@@ -102,7 +102,7 @@ class YouTubeRepository(
     private suspend fun remoteSearch(query: String, filter: SearchFilter, pageToken: String?, key: String): SearchResults {
         val type = when (filter) {
             SearchFilter.ALL -> "video,channel,playlist"
-            SearchFilter.TRACKS -> "video"
+            SearchFilter.TRACKS, SearchFilter.VIDEOS -> "video"
             SearchFilter.ARTISTS -> "channel"
             SearchFilter.PLAYLISTS -> "playlist"
         }
@@ -205,13 +205,22 @@ class YouTubeRepository(
         }
     }
 
+    companion object {
+        /** Bumped when track mapping changes so stale cached pages are refetched once. */
+        private const val CACHE_VERSION = "v2|"
+    }
+
     private fun YtVideo.toTrack(): Track {
-        val (artist, title) = Formatters.splitYouTubeTitle(snippet.title, snippet.channelTitle)
+        val parsed = Formatters.parseYouTubeTitle(snippet.title, snippet.channelTitle)
         val genres = MetadataEnricher.genres(snippet.title, snippet.tags, snippet.description)
         return Track(
             id = TrackId.youtube(id),
-            title = title,
-            artist = artist,
+            title = parsed.title,
+            artist = parsed.artist,
+            album = parsed.album,
+            credits = parsed.credits,
+            variant = com.arnav.music.domain.catalog.TrackClassifier.variant(snippet.channelTitle, snippet.title),
+            compilation = com.arnav.music.domain.catalog.TrackClassifier.isCompilation(snippet.title, Formatters.parseIsoDuration(contentDetails.duration)),
             durationMs = Formatters.parseIsoDuration(contentDetails.duration),
             artworkUrl = snippet.thumbnails.best() ?: "https://i.ytimg.com/vi/$id/hqdefault.jpg",
             playbackRef = id,

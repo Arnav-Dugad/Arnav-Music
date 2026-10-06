@@ -71,6 +71,10 @@ data class QueueState(
         return copy(items = list, currentIndex = newCurrent, originalOrder = originalOrder - removedUid)
     }
 
+    /** Swaps the track at [index] (e.g. another upload of the same song), keeping its slot and uid. */
+    fun replaceAt(index: Int, track: Track): QueueState =
+        if (index !in items.indices) this else copy(items = items.toMutableList().also { it[index] = it[index].copy(track = track) })
+
     fun skipTo(index: Int): QueueState = if (index in items.indices) copy(currentIndex = index) else this
     fun next(repeatAll: Boolean = false): QueueState = when {
         hasNext -> copy(currentIndex = currentIndex + 1)

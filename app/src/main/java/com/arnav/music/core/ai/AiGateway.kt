@@ -41,6 +41,9 @@ class AiGateway(
     @Volatile private var lastCallAt = 0L
     @Volatile private var quotaBlockedUntil = 0L
     @Volatile private var appCheckBlockedUntil = 0L
+    /** Last Gemini failure, shown in Settings → Arnav AI for diagnosis (no prompts or user data). */
+    @Volatile var lastError: String? = null
+        private set
 
     fun availability(): AiUnavailableReason? {
         val s = settings.settings.value
@@ -88,6 +91,7 @@ class AiGateway(
                 AiOutcome.Unavailable(AiUnavailableReason.TIMEOUT)
             } catch (e: Exception) {
                 val msg = (e.message ?: "").lowercase()
+                lastError = "${e.javaClass.simpleName}: ${e.message?.take(160) ?: "no message"}"
                 Log.w("AI call failed", e)
                 if ("app check" in msg || "appcheck" in msg || "attestation" in msg || "app-check" in msg) {
                     // Enforced App Check rejected this install (e.g. sideloaded APK + Play Integrity).
@@ -106,6 +110,9 @@ class AiGateway(
     }
 
     suspend fun clearCache() = cache.clear()
+
+    /** Counted when a request had to be answered by the on-device engine. */
+    fun noteFallback() = usage.aiFallback()
 
     private fun sha256(s: String): String =
         MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
