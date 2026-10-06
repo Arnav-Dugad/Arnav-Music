@@ -71,6 +71,9 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            // Phones are ARM: ship only ARM native code (ML Kit's translation engine is large per ABI).
+            // Debug builds keep x86/x86_64 for emulators and CI UI tests.
+            ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("release")
         }
