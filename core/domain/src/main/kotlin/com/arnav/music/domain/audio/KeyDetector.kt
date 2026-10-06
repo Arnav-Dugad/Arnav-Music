@@ -19,8 +19,8 @@ data class KeyEstimate(val key: Int, val confidence: Float, val correlation: Flo
 }
 
 /**
- * Musical key from audio: a track-average chromagram matched against Krumhansl–Kessler key
- * profiles (the Krumhansl–Schmuckler algorithm).
+ * Musical key from audio: a track-average chromagram correlated with 24 rotated key profiles
+ * (the Krumhansl–Schmuckler method, with Temperley's profiles).
  *
  * Chroma: Hann-windowed FFT frames (~0.37 s, 4096 samples at 11 025 Hz, 50 % hop). Bin power is
  * collected per semitone for the five octaves C2..B6 (65 Hz – 2 kHz), log-compressed, the frame's
@@ -34,9 +34,13 @@ object KeyDetector {
     /** Below this the key isn't reported. */
     const val MIN_CONFIDENCE = 0.4f
 
-    /** Krumhansl–Kessler probe-tone ratings, index 0 = tonic. */
-    private val MAJOR_PROFILE = doubleArrayOf(6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88)
-    private val MINOR_PROFILE = doubleArrayOf(6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17)
+    /**
+     * Temperley's (Kostka–Payne corpus) key profiles, index 0 = tonic. They weigh the tonic triad
+     * more than the Krumhansl–Kessler ratings, which keeps a bare I chord from reading as its
+     * mediant minor (C–E–G vs E minor) once the tones' overtones land in the chroma.
+     */
+    private val MAJOR_PROFILE = doubleArrayOf(0.748, 0.060, 0.488, 0.082, 0.670, 0.460, 0.096, 0.715, 0.104, 0.366, 0.057, 0.400)
+    private val MINOR_PROFILE = doubleArrayOf(0.712, 0.084, 0.474, 0.618, 0.049, 0.460, 0.105, 0.747, 0.404, 0.067, 0.133, 0.330)
 
     /** Chroma below this spread (std / mean) is basically flat: no tonal centre. */
     private const val FULL_CONTRAST = 0.35

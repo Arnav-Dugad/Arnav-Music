@@ -19,7 +19,7 @@ class DuplicatesTest {
     @Test fun `title key strips credits, upload noise and punctuation`() {
         assertEquals("dont stop me now", Duplicates.titleKey("Don't Stop Me Now (Remastered 2011)", "Queen"))
         assertEquals("dont stop me now", Duplicates.titleKey("Queen - Don't Stop Me Now [Official Video]", "Queen Official"))
-        assertEquals("one more time", Duplicates.titleKey("Daft Punk - One More Time (Official Video)", "DaftPunkVEVO"))
+        assertEquals("levitating", Duplicates.titleKey("Dua Lipa - Levitating (Official Video)", "DuaLipaVEVO"))
         assertEquals("starboy", Duplicates.titleKey("Starboy (feat. Daft Punk)", "The Weeknd"))
         assertEquals("starboy", Duplicates.titleKey("Starboy ft. Daft Punk (Lyrics)", "The Weeknd"))
         assertEquals("kesariya", Duplicates.titleKey("Kesariya | Brahmastra | Arijit Singh", "Arijit Singh"))

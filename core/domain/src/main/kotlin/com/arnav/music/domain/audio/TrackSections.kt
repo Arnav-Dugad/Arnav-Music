@@ -18,8 +18,8 @@ data class TrackSections(val introMs: Long, val outroMs: Long) {
  * Intro/outro detection from short-term level (plain RMS in 50 ms blocks).
  *
  * - The reference is the median of the 400 ms short-term level over every non-silent moment.
- * - **Intro**: the first 50 ms block within [INTRO_DB] of that median whose following second also
- *   stays (on average) within it — so a lone click doesn't count. If that's past [MAX_INTRO_FRACTION]
+ * - **Intro**: the first 50 ms block within [INTRO_DB] of that median where most of the following
+ *   second stays within it too — so a lone click doesn't count. If that's past [MAX_INTRO_FRACTION]
  *   of the track (a genuinely quiet opening), only leading digital silence is skipped instead.
  * - **Outro**: the start of the final stretch whose short-term level stays at least [OUTRO_DB]
  *   below the median until the end (a fade-out tail or trailing silence); 0 when that stretch is
@@ -80,7 +80,7 @@ object SectionDetector {
         val introGate = median - INTRO_DB
         var musicStart = -1
         for (i in 0 until count) {
-            if (db(power[i]) >= introGate && meanDb(i, i + SUSTAIN_BLOCKS) >= introGate) { musicStart = i; break }
+            if (db(power[i]) >= introGate && sustained(power, i, introGate)) { musicStart = i; break }
         }
         val cap = (durationMs * MAX_INTRO_FRACTION).toLong()
         var introMs = if (musicStart < 0) 0L else musicStart * BLOCK_MS
@@ -96,6 +96,14 @@ object SectionDetector {
         while (tail > 0 && shortTerm[tail - 1] <= outroGate) tail--
         val outroMs = if (tail >= count || (count - tail) * BLOCK_MS < MIN_OUTRO_MS || tail * BLOCK_MS <= introMs) 0L else tail * BLOCK_MS
         return TrackSections(introMs, outroMs)
+    }
+
+    /** Most of the second from [from] stays above [gateDb] (a click or a breath doesn't). */
+    private fun sustained(power: DoubleArray, from: Int, gateDb: Double): Boolean {
+        val end = min(power.size, from + SUSTAIN_BLOCKS)
+        var loud = 0
+        for (i in from until end) if (db(power[i]) >= gateDb) loud++
+        return loud >= (end - from) * 0.6
     }
 
     private fun db(p: Double): Double = 10.0 * log10(p + 1e-12)
